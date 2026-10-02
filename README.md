@@ -42,6 +42,17 @@ the same login).
 PASSWORD='something-long' npm start
 ```
 
+## Tags
+
+Hover a conversation in the sidebar and click the tag button to edit its tags
+(up to 10, 30 characters each). Type a tag and press Enter, or click one of your
+**quick tags** to add or remove it. Every tag you apply is remembered as a quick
+tag; the × next to a quick tag forgets it (chats keep the tags they already
+have). Tags show under the chat, and a row of tag chips above the list filters
+it. Everything is saved on the host in `~/.claude-web/tags.json`, so every
+device sees the same tags and quick tags. They are not written into the Claude
+Code transcripts.
+
 ## How turns work
 
 - One conversation runs one turn at a time. While Claude is working, sending

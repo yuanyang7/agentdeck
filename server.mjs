@@ -109,7 +109,7 @@ function rekey(state, sessionId) {
   broadcast({ type: 'session_bound', key: oldKey, sessionId, dir: state.dir });
 }
 
-async function runTurn(state, text, mode, model) {
+async function runTurn(state, text, mode, model, effort) {
   state.running = true;
   state.mode = mode;
   state.buffer = [];
@@ -125,6 +125,7 @@ async function runTurn(state, text, mode, model) {
   };
   if (state.sessionId) options.resume = state.sessionId;
   if (model) options.model = model;
+  if (effort) options.effort = effort;
   if (mode === 'bypassPermissions') options.allowDangerouslySkipPermissions = true;
 
   try {
@@ -227,6 +228,97 @@ async function listProjects() {
   return [...byDir.values()].sort((a, b) => b.lastModified - a.lastModified || a.name.localeCompare(b.name));
 }
 
+// ---------- usage ----------
+
+// Plan limits and spend come from a short-lived idle query (no turn is run).
+// Cached briefly so repeatedly opening the panel doesn't spawn processes.
+let usageCache = { at: 0, data: null };
+
+async function getUsage() {
+  if (usageCache.data && Date.now() - usageCache.at < 30_000) return usageCache.data;
+  const idle = (async function* () {
+    await new Promise(() => {});
+  })();
+  const q = query({ prompt: idle, options: { cwd: os.homedir() } });
+  try {
+    const data = await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
+    usageCache = { at: Date.now(), data };
+    return data;
+  } finally {
+    q.close();
+  }
+}
+
+// What "Default model" / "Default effort" resolve to, from the user's Claude
+// Code settings. Project-level settings overrides aren't considered.
+let defaultsCache = null;
+
+async function getDefaults() {
+  if (defaultsCache) return defaultsCache;
+  let settings = {};
+  try {
+    settings = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf8'));
+  } catch {}
+  const idle = (async function* () {
+    await new Promise(() => {});
+  })();
+  const q = query({ prompt: idle, options: { cwd: os.homedir() } });
+  try {
+    const models = await q.supportedModels();
+    const wanted = settings.model || 'default';
+    const hit = models.find((m) => m.value === wanted || m.resolvedModel === wanted) || models.find((m) => m.value === 'default');
+    const resolved = hit?.resolvedModel || null;
+    const perModel = Object.entries(settings.modelSettings || {}).find(([k]) => resolved && resolved.startsWith(k));
+    const effort = perModel?.[1]?.effortLevel || settings.effortLevel || null;
+    defaultsCache = { model: resolved, modelName: hit?.displayName || null, effort, models };
+    return defaultsCache;
+  } finally {
+    q.close();
+  }
+}
+
+// ---------- tags ----------
+
+// Chat tags live in a sidecar file rather than in the transcripts, because
+// Claude Code's own session tag holds only one string. Shape:
+//   { sessions: { [sessionId]: string[] }, quick: string[] }
+// `quick` is the saved list offered as one-click choices in the tag editor.
+const TAGS_FILE = path.join(os.homedir(), '.claude-web', 'tags.json');
+const MAX_TAGS = 10;
+const MAX_QUICK = 50;
+const MAX_TAG_LEN = 30;
+
+let tagStore = { sessions: {}, quick: [] };
+try {
+  const raw = JSON.parse(fs.readFileSync(TAGS_FILE, 'utf8'));
+  if (raw.sessions) tagStore = { sessions: raw.sessions, quick: raw.quick || [] };
+  else tagStore = { sessions: raw, quick: [...new Set(Object.values(raw).flat())] }; // first version: bare map
+} catch {}
+
+function normalizeTags(list, max) {
+  const out = [];
+  for (const raw of list) {
+    const t = String(raw).trim().replace(/\s+/g, ' ').slice(0, MAX_TAG_LEN);
+    if (t && !out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t);
+  }
+  return out.slice(0, max);
+}
+
+function saveTags() {
+  fs.mkdirSync(path.dirname(TAGS_FILE), { recursive: true });
+  const tmp = TAGS_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(tagStore, null, 2));
+  fs.renameSync(tmp, TAGS_FILE);
+}
+
+function setTags(sessionId, list) {
+  if (list.length) tagStore.sessions[sessionId] = list;
+  else delete tagStore.sessions[sessionId];
+  // Anything applied to a chat is remembered as a quick tag.
+  tagStore.quick = normalizeTags([...tagStore.quick, ...list], MAX_QUICK);
+  saveTags();
+}
+
 // ---------- http ----------
 
 const STATIC = {
@@ -256,6 +348,7 @@ async function readJson(req) {
   return data ? JSON.parse(data) : {};
 }
 
+const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 const MODES = new Set(['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto']);
 
 const server = http.createServer(async (req, res) => {
@@ -301,6 +394,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (p === '/api/defaults') return send(res, 200, await getDefaults());
+
+    if (p === '/api/usage') return send(res, 200, await getUsage());
+
     if (p === '/api/projects') return send(res, 200, await listProjects());
 
     if (p === '/api/sessions') {
@@ -308,7 +405,7 @@ const server = http.createServer(async (req, res) => {
       const sessions = (await listSessions({ dir })).filter((s) => !s.cwd || s.cwd === dir);
       const out = sessions
         .sort((a, b) => b.lastModified - a.lastModified)
-        .map((s) => ({ ...s, running: !!live.get(s.sessionId)?.running }));
+        .map((s) => ({ ...s, running: !!live.get(s.sessionId)?.running, tags: tagStore.sessions[s.sessionId] || [] }));
       // Brand-new conversations that haven't reported an id yet.
       for (const st of live.values()) {
         if (!st.sessionId && st.dir === dir && st.running) {
@@ -333,9 +430,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/send' && req.method === 'POST') {
-      const { sessionId, dir, text, mode = 'default', model } = await readJson(req);
+      const { sessionId, dir, text, mode = 'default', model, effort } = await readJson(req);
       if (!text || typeof text !== 'string') return send(res, 400, { error: 'Empty message' });
       if (!MODES.has(mode)) return send(res, 400, { error: 'Bad mode' });
+      if (effort && !EFFORTS.has(effort)) return send(res, 400, { error: 'Bad effort' });
       if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
         return send(res, 400, { error: 'Project folder not found' });
       }
@@ -349,7 +447,7 @@ const server = http.createServer(async (req, res) => {
         live.set(key, state);
       }
       state.dir = dir;
-      runTurn(state, text, mode, model);
+      runTurn(state, text, mode, model, effort);
       return send(res, 200, { key: state.key });
     }
 
@@ -382,6 +480,26 @@ const server = http.createServer(async (req, res) => {
         state.query.close();
       }
       return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/tags' && req.method === 'POST') {
+      const { sessionId, dir, tags: list } = await readJson(req);
+      if (typeof sessionId !== 'string' || !/^[\w-]+$/.test(sessionId)) return send(res, 400, { error: 'Bad session' });
+      if (!Array.isArray(list)) return send(res, 400, { error: 'Bad tags' });
+      const clean = normalizeTags(list, MAX_TAGS);
+      setTags(sessionId, clean);
+      broadcast({ type: 'sessions_changed', dir });
+      return send(res, 200, { tags: clean, quick: tagStore.quick });
+    }
+
+    if (p === '/api/quicktags') {
+      if (req.method === 'POST') {
+        const { quick } = await readJson(req);
+        if (!Array.isArray(quick)) return send(res, 400, { error: 'Bad tags' });
+        tagStore.quick = normalizeTags(quick, MAX_QUICK);
+        saveTags();
+      }
+      return send(res, 200, { quick: tagStore.quick });
     }
 
     if (p === '/api/mode' && req.method === 'POST') {

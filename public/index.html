@@ -22,6 +22,7 @@
         <select id="project" title="Project folder"></select>
         <button id="new-chat" class="primary">+ New conversation</button>
       </div>
+      <div id="tag-filter" class="tag-filter hidden"></div>
       <ul id="sessions" class="sessions"></ul>
       <div class="sidebar-foot" id="host"></div>
     </aside>
@@ -34,7 +35,10 @@
           <div id="subtitle" class="muted"></div>
         </div>
         <span id="status" class="status"></span>
+        <button id="toggle-usage" class="icon" title="Usage">Usage</button>
       </header>
+
+      <div id="usage" class="usage hidden"></div>
 
       <div id="messages" class="messages"></div>
 
@@ -50,6 +54,21 @@
             <option value="auto">Auto</option>
             <option value="bypassPermissions">Bypass permissions</option>
           </select>
+          <select id="model" title="Model">
+            <option value="">Default model</option>
+            <option value="claude-fable-5-1">Fable 5.1</option>
+            <option value="claude-opus-5-5">Opus 5.5</option>
+            <option value="claude-sonnet-5-5">Sonnet 5.5</option>
+            <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+          </select>
+          <select id="effort" title="Effort">
+            <option value="">Default effort</option>
+            <option value="low">Low effort</option>
+            <option value="medium">Medium effort</option>
+            <option value="high">High effort</option>
+            <option value="xhigh">Extra-high effort</option>
+            <option value="max">Max effort</option>
+          </select>
           <span class="spacer"></span>
           <button type="button" id="stop" class="danger hidden">Stop</button>
           <button type="submit" id="send" class="primary">Send</button>
@@ -57,6 +76,20 @@
       </form>
     </main>
   </div>
+
+  <dialog id="tag-dialog" class="tag-dialog">
+    <form method="dialog" id="tag-form">
+      <h2>Tags</h2>
+      <div id="tag-current" class="tag-list"></div>
+      <input id="tag-input" type="text" maxlength="30" placeholder="Type a tag and press Enter" autocomplete="off">
+      <div class="muted tag-hint">Quick tags (click to add or remove; × forgets one)</div>
+      <div id="tag-quick" class="tag-list"></div>
+      <div class="tag-actions">
+        <button type="button" id="tag-cancel">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>

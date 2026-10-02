@@ -9,6 +9,7 @@ const ui = {
   running: false,
   pending: [],
   sessions: [],
+  tagFilter: null, // tag the chat list is filtered to, or null
   toolCards: new Map(), // tool_use_id -> element
   seen: new Set(), // message uuids already rendered
   streamEl: null,
@@ -127,10 +128,117 @@ function timeAgo(ms) {
   return new Date(ms).toLocaleDateString();
 }
 
+// Tag editor: `draft` is this chat's tags while the dialog is open; Save sends it.
+const tagEd = { session: null, draft: [], quick: [] };
+const hasTag = (list, t) => list.some((x) => x.toLowerCase() === t.toLowerCase());
+
+function renderTagEditor() {
+  const cur = $('tag-current');
+  cur.innerHTML = '';
+  if (!tagEd.draft.length) cur.appendChild(el('span', 'muted', 'No tags yet'));
+  for (const t of tagEd.draft) {
+    const chip = el('button', 'tag on', t + ' ×');
+    chip.type = 'button';
+    chip.onclick = () => {
+      tagEd.draft = tagEd.draft.filter((x) => x !== t);
+      renderTagEditor();
+    };
+    cur.appendChild(chip);
+  }
+  const quick = $('tag-quick');
+  quick.innerHTML = '';
+  for (const t of tagEd.quick) {
+    const wrap = el('span', 'tag-q');
+    const chip = el('button', 'tag' + (hasTag(tagEd.draft, t) ? ' on' : ''), t);
+    chip.type = 'button';
+    chip.onclick = () => {
+      if (hasTag(tagEd.draft, t)) tagEd.draft = tagEd.draft.filter((x) => x.toLowerCase() !== t.toLowerCase());
+      else tagEd.draft.push(t);
+      renderTagEditor();
+    };
+    const forget = el('button', 'tag-forget', '×');
+    forget.type = 'button';
+    forget.title = 'Remove from quick tags';
+    forget.onclick = async () => {
+      tagEd.quick = tagEd.quick.filter((x) => x !== t);
+      renderTagEditor();
+      api('/api/quicktags', { quick: tagEd.quick }).catch(() => {});
+    };
+    wrap.append(chip, forget);
+    quick.appendChild(wrap);
+  }
+  if (!tagEd.quick.length) quick.appendChild(el('span', 'muted', 'Tags you use are saved here'));
+}
+
+function addDraftTag() {
+  const t = $('tag-input').value.trim().replace(/\s+/g, ' ');
+  $('tag-input').value = '';
+  if (t && !hasTag(tagEd.draft, t)) tagEd.draft.push(t);
+  renderTagEditor();
+}
+
+async function editTags(s) {
+  tagEd.session = s;
+  tagEd.draft = [...(s.tags || [])];
+  tagEd.quick = [];
+  renderTagEditor();
+  $('tag-dialog').showModal();
+  $('tag-input').focus();
+  api('/api/quicktags').then((r) => {
+    tagEd.quick = r.quick;
+    renderTagEditor();
+  }).catch(() => {});
+}
+
+$('tag-input').addEventListener('keydown', (e) => {
+  // Enter adds the typed tag instead of saving the dialog; comma works too.
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    addDraftTag();
+  }
+});
+
+$('tag-cancel').addEventListener('click', () => $('tag-dialog').close());
+
+$('tag-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  addDraftTag(); // whatever is still in the input counts
+  const s = tagEd.session;
+  try {
+    const r = await api('/api/tags', { sessionId: s.sessionId, dir: ui.dir, tags: tagEd.draft });
+    s.tags = r.tags;
+    $('tag-dialog').close();
+    renderSessions();
+  } catch (err) {
+    alert('Could not save tags: ' + err.message);
+  }
+});
+
+function renderTagFilter() {
+  const box = $('tag-filter');
+  const counts = new Map();
+  for (const s of ui.sessions) for (const t of s.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
+  // A filter whose tag no longer exists would hide everything with no way back.
+  if (ui.tagFilter && !counts.has(ui.tagFilter)) ui.tagFilter = null;
+  box.innerHTML = '';
+  box.classList.toggle('hidden', counts.size === 0);
+  for (const [t, n] of [...counts].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const chip = el('button', 'tag' + (t === ui.tagFilter ? ' on' : ''), `${t} ${n}`);
+    chip.type = 'button';
+    chip.onclick = () => {
+      ui.tagFilter = ui.tagFilter === t ? null : t;
+      renderSessions();
+    };
+    box.appendChild(chip);
+  }
+}
+
 function renderSessions() {
   const ul = $('sessions');
   ul.innerHTML = '';
+  renderTagFilter();
   for (const s of ui.sessions) {
+    if (ui.tagFilter && !(s.tags || []).includes(ui.tagFilter)) continue;
     const li = document.createElement('li');
     const id = s.sessionId || s.key;
     if (id === ui.key) li.classList.add('active');
@@ -146,6 +254,21 @@ function renderSessions() {
     meta.className = 's-meta';
     meta.textContent = [timeAgo(s.lastModified), s.gitBranch].filter(Boolean).join(' · ');
     li.append(t, meta);
+    if (s.tags?.length) {
+      const row = el('div', 's-tags');
+      for (const tag of s.tags) row.appendChild(el('span', 'tag', tag));
+      li.appendChild(row);
+    }
+    if (s.sessionId) {
+      const b = el('button', 's-tag-btn', '🏷');
+      b.type = 'button';
+      b.title = 'Edit tags';
+      b.onclick = (e) => {
+        e.stopPropagation();
+        editTags(s);
+      };
+      li.appendChild(b);
+    }
     li.onclick = () => {
       openConversation(id);
       $('sidebar').classList.remove('open');
@@ -606,6 +729,8 @@ $('composer').addEventListener('submit', async (e) => {
       dir: ui.dir,
       text,
       mode: $('mode').value,
+      model: $('model').value || undefined,
+      effort: $('effort').value || undefined,
     });
     if (!ui.key) {
       ui.key = key;
@@ -630,6 +755,78 @@ $('mode').addEventListener('change', () => {
   if (ui.key) api('/api/mode', { key: ui.key, mode: $('mode').value }).catch(() => {});
 });
 
+// ---------- usage ----------
+
+const LIMIT_LABELS = {
+  five_hour: '5-hour',
+  seven_day: '7-day',
+  seven_day_opus: '7-day Opus',
+  seven_day_sonnet: '7-day Sonnet',
+};
+
+function usageRow(label, pct, resetsAt) {
+  const row = el('div', 'u-row');
+  row.appendChild(el('span', 'u-label', label));
+  const bar = el('div', 'u-bar');
+  const fill = el('div', 'u-fill');
+  const v = Math.max(0, Math.min(100, pct ?? 0));
+  fill.style.width = v + '%';
+  if (v >= 90) fill.classList.add('hot');
+  bar.appendChild(fill);
+  row.appendChild(bar);
+  const reset = resetsAt ? ' · resets ' + new Date(resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+  row.appendChild(el('span', 'u-pct', Math.round(v) + '%' + reset));
+  return row;
+}
+
+async function loadUsage() {
+  const box = $('usage');
+  box.textContent = 'Loading usage…';
+  try {
+    const u = await api('/api/usage');
+    box.innerHTML = '';
+    const head = u.subscription_type ? `Plan: ${u.subscription_type}` : 'API key / no plan limits';
+    box.appendChild(el('div', 'u-head', head));
+    const rl = u.rate_limits;
+    if (u.rate_limits_available && rl) {
+      for (const [k, label] of Object.entries(LIMIT_LABELS)) {
+        if (rl[k] && rl[k].utilization != null) box.appendChild(usageRow(label, rl[k].utilization, rl[k].resets_at));
+      }
+      for (const m of rl.model_scoped || []) {
+        if (m.utilization != null) box.appendChild(usageRow('7-day ' + m.display_name, m.utilization, m.resets_at));
+      }
+      const x = rl.extra_usage;
+      if (x?.is_enabled && x.utilization != null) box.appendChild(usageRow('Extra usage', x.utilization, null));
+    } else {
+      box.appendChild(el('div', 'muted', 'Plan rate limits are not available for this login.'));
+    }
+  } catch (err) {
+    box.textContent = 'Could not load usage: ' + err.message;
+  }
+}
+
+$('toggle-usage').addEventListener('click', () => {
+  const box = $('usage');
+  box.classList.toggle('hidden');
+  if (!box.classList.contains('hidden')) loadUsage();
+});
+
+// The chosen model is remembered in this browser and applies to the next message.
+$('model').value = localStorage.getItem('cw_model') || '';
+if ($('model').value !== (localStorage.getItem('cw_model') || '')) $('model').value = '';
+$('model').addEventListener('change', () => localStorage.setItem('cw_model', $('model').value));
+$('effort').value = localStorage.getItem('cw_effort') || '';
+if ($('effort').value !== (localStorage.getItem('cw_effort') || '')) $('effort').value = '';
+$('effort').addEventListener('change', () => localStorage.setItem('cw_effort', $('effort').value));
+
+// Make the "Default" entries say what they actually resolve to.
+async function labelDefaults() {
+  const d = await api('/api/defaults');
+  const name = d.models.find((m) => m.resolvedModel === d.model && m.value !== 'default')?.displayName || d.modelName;
+  if (name) $('model').options[0].textContent = `Default (${name})`;
+  if (d.effort) $('effort').options[0].textContent = `Default (${d.effort})`;
+}
+
 // ---------- boot ----------
 
 async function start() {
@@ -644,6 +841,7 @@ async function start() {
   if (h.s) await openConversation(h.s);
   else newConversation();
   connectEvents();
+  labelDefaults().catch(() => {});
 }
 
 start().catch((err) => {

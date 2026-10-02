@@ -223,3 +223,58 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
   .messages, .composer, .topbar { padding-left: 12px; padding-right: 12px; }
   .composer textarea { font-size: 16px; }
 }
+
+.usage { padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--panel); font-size: 13px; }
+.u-head { font-weight: 600; margin-bottom: 6px; }
+.u-row { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
+.u-label { width: 110px; flex: none; }
+.u-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; max-width: 320px; }
+.u-fill { height: 100%; background: var(--accent); }
+.u-fill.hot { background: var(--danger); }
+.u-pct { color: var(--muted); white-space: nowrap; }
+
+.sessions li { position: relative; }
+.s-tags, .tag-filter { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag-filter { padding: 0 12px 8px; }
+.tag {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+}
+button.tag { cursor: pointer; }
+button.tag.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.s-tag-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 0 4px;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  opacity: 0;
+}
+.sessions li:hover .s-tag-btn, .s-tag-btn:focus-visible { opacity: 0.7; }
+.s-tag-btn:hover { opacity: 1 !important; }
+@media (hover: none) { .s-tag-btn { opacity: 0.6; } }
+
+.tag-dialog {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  width: min(420px, calc(100vw - 32px));
+  padding: 16px;
+}
+.tag-dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
+.tag-dialog h2 { margin: 0 0 10px; font-size: 16px; }
+.tag-dialog input { width: 100%; box-sizing: border-box; margin: 10px 0; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 16px; }
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
+.tag-list .tag { font-size: 13px; padding: 3px 10px; }
+.tag-hint { font-size: 12px; margin-bottom: 6px; }
+.tag-q { display: inline-flex; align-items: center; }
+.tag-forget { border: none; background: transparent; color: var(--muted); padding: 0 4px; font-size: 13px; cursor: pointer; }
+.tag-forget:hover { color: var(--danger); }
+.tag-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
