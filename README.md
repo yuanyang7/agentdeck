@@ -20,9 +20,10 @@ npm start
 ```
 
 By default it listens on this machine's Tailscale IP (from `tailscale ip -4`),
-port 7878, so it can only be reached from devices on your tailnet. Open
-`http://<tailscale-ip>:7878` (or `http://<machine-name>:7878` with MagicDNS)
-from another device.
+port 7878, so it can only be reached from devices on your tailnet. On startup
+it prints the address to open from other devices. Prefer the MagicDNS name
+(`http://<machine-name>:7878`): it stays the same, and some browsers refuse or
+try HTTPS on a bare `100.x` IP. Always type the `http://` prefix.
 
 Requires Node 18+ and Claude Code being logged in on the host (the server uses
 the same login).

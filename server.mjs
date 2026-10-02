@@ -36,6 +36,15 @@ function detectHost() {
 }
 const HOST = detectHost();
 
+function magicDnsName() {
+  try {
+    const status = JSON.parse(execFileSync('tailscale', ['status', '--json'], { encoding: 'utf8' }));
+    return status.Self?.DNSName?.replace(/\.$/, '') || null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- auth ----------
 
 const tokens = new Set();
@@ -396,6 +405,8 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`claude-web listening on http://${HOST}:${PORT}`);
+  const name = HOST.startsWith('100.') && magicDnsName();
+  if (name) console.log(`Open from other devices: http://${name}:${PORT}  (or http://${name.split('.')[0]}:${PORT})`);
   console.log(PASSWORD ? 'Password protection: on' : 'Password protection: off (set PASSWORD to enable)');
   console.log(`Project roots: ${PROJECT_ROOTS.join(', ')}`);
 });
