@@ -299,3 +299,14 @@ button.tag.on { background: var(--accent); border-color: var(--accent); color: v
 .msg-images img { max-height: 200px; max-width: 100%; border-radius: 8px; cursor: zoom-in; }
 .msg-user { white-space: normal; }
 .msg-user .msg-text { white-space: pre-wrap; }
+
+/* agents */
+.agent-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 0 6px;
+  margin-right: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+}

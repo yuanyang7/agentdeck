@@ -1,9 +1,8 @@
-// claude-web: a small web UI for driving Claude Code conversations on this
-// machine from other devices on your Tailscale network.
+// claude-web: a small web UI for driving coding-agent conversations (Claude
+// Code, opencode) on this machine from other devices on your Tailscale network.
 //
-// One server process owns every running turn, so any browser that connects
-// sees the same live conversation. A conversation accepts one turn at a time;
-// the lock releases itself when the turn finishes.
+// This file is the HTTP layer. Live turns are run by lib/hub.mjs, and each
+// agent is adapted to a common shape in lib/agents/.
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -12,11 +11,9 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import {
-  query,
-  listSessions,
-  getSessionMessages,
-} from '@anthropic-ai/claude-agent-sdk';
+import { Hub, BusyError } from './lib/hub.mjs';
+import { backends, availableBackends } from './lib/agents/index.mjs';
+import { tagsOf, setTags, quickTags, setQuickTags } from './lib/tags.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 7878);
@@ -69,151 +66,9 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-// ---------- live state ----------
-
-// key -> { key, sessionId, dir, running, query, mode, buffer: [], pending: Map }
-// key is the sessionId once known; a brand-new conversation uses a temp key
-// until the SDK reports its session id.
-const live = new Map();
-const clients = new Set(); // SSE responses
-
-function broadcast(event) {
-  const data = `data: ${JSON.stringify(event)}\n\n`;
-  for (const res of clients) res.write(data);
-}
-
-function emit(state, event) {
-  const ev = { key: state.key, sessionId: state.sessionId, ...event };
-  // Keep the in-progress turn so viewers that join mid-turn can catch up.
-  if (event.type !== 'status') state.buffer.push(ev);
-  broadcast(ev);
-}
-
-function statusOf(state) {
-  return {
-    type: 'status',
-    running: state.running,
-    mode: state.mode,
-    dir: state.dir,
-    pending: [...state.pending.values()].map((p) => p.request),
-  };
-}
-
-function rekey(state, sessionId) {
-  if (state.sessionId === sessionId) return;
-  const oldKey = state.key;
-  live.delete(oldKey);
-  state.key = sessionId;
-  state.sessionId = sessionId;
-  live.set(sessionId, state);
-  broadcast({ type: 'session_bound', key: oldKey, sessionId, dir: state.dir });
-}
-
-// With images the prompt has to be a streamed user message holding image blocks
-// followed by the text; the stream ends after that one message.
-function buildPrompt(state, text, images) {
-  if (!images.length) return text;
-  const content = images.map((img) => ({
-    type: 'image',
-    source: { type: 'base64', media_type: img.mediaType, data: img.data },
-  }));
-  if (text) content.push({ type: 'text', text });
-  return (async function* () {
-    yield { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: state.sessionId || '' };
-  })();
-}
-
-async function runTurn(state, text, images, mode, model, effort) {
-  state.running = true;
-  state.mode = mode;
-  state.buffer = [];
-  emit(state, { type: 'user_text', text, images });
-  emit(state, statusOf(state));
-
-  const options = {
-    cwd: state.dir,
-    permissionMode: mode,
-    includePartialMessages: true,
-    systemPrompt: { type: 'preset', preset: 'claude_code' },
-    canUseTool: (toolName, input, opts) => askPermission(state, toolName, input, opts),
-  };
-  if (state.sessionId) options.resume = state.sessionId;
-  if (model) options.model = model;
-  if (effort) options.effort = effort;
-  if (mode === 'bypassPermissions') options.allowDangerouslySkipPermissions = true;
-
-  try {
-    const q = query({ prompt: buildPrompt(state, text, images), options });
-    state.query = q;
-    for await (const msg of q) {
-      if (msg.session_id && !state.sessionId) rekey(state, msg.session_id);
-      if (msg.type === 'stream_event') {
-        const ev = msg.event;
-        if (msg.parent_tool_use_id) continue;
-        if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
-          broadcast({ key: state.key, sessionId: state.sessionId, type: 'delta', text: ev.delta.text });
-        }
-        continue;
-      }
-      if (msg.type === 'assistant' || msg.type === 'user') {
-        emit(state, {
-          type: 'message',
-          message: {
-            type: msg.type,
-            uuid: msg.uuid,
-            message: msg.message,
-            parent_tool_use_id: msg.parent_tool_use_id ?? null,
-          },
-        });
-      } else if (msg.type === 'result') {
-        emit(state, {
-          type: 'result',
-          subtype: msg.subtype,
-          cost: msg.total_cost_usd,
-          duration: msg.duration_ms,
-          error: msg.subtype === 'success' ? null : (msg.errors || []).join('\n') || msg.subtype,
-        });
-      }
-    }
-  } catch (err) {
-    emit(state, { type: 'error', error: String(err?.message || err) });
-  } finally {
-    for (const p of state.pending.values()) p.resolve({ behavior: 'deny', message: 'Turn ended.' });
-    state.pending.clear();
-    state.running = false;
-    state.query = null;
-    emit(state, statusOf(state));
-    broadcast({ type: 'sessions_changed', dir: state.dir });
-  }
-}
-
-function askPermission(state, toolName, input, opts) {
-  const id = crypto.randomUUID();
-  const request = {
-    id,
-    toolName,
-    input,
-    title: opts.title || null,
-    reason: opts.decisionReason || null,
-    blockedPath: opts.blockedPath || null,
-    canAlways: Array.isArray(opts.suggestions) && opts.suggestions.length > 0,
-  };
-  return new Promise((resolve) => {
-    state.pending.set(id, { request, resolve, suggestions: opts.suggestions });
-    opts.signal?.addEventListener('abort', () => {
-      if (state.pending.delete(id)) {
-        resolve({ behavior: 'deny', message: 'Aborted.' });
-        emit(state, statusOf(state));
-      }
-    });
-    emit(state, statusOf(state));
-  });
-}
+const hub = new Hub();
 
 // ---------- projects ----------
-
-// Temporary per-session folders made by the Claude desktop app.
-const HIDDEN_DIR = /\/Library\/Application Support\/Claude\/|^\/private\/tmp\/|^\/tmp\//;
 
 async function listProjects() {
   const byDir = new Map();
@@ -228,109 +83,44 @@ async function listProjects() {
       byDir.set(dir, { dir, name: e.name, lastModified: 0, sessions: 0 });
     }
   }
-  try {
-    for (const s of await listSessions()) {
-      if (!s.cwd || HIDDEN_DIR.test(s.cwd) || !fs.existsSync(s.cwd)) continue;
-      const p = byDir.get(s.cwd) || { dir: s.cwd, name: path.basename(s.cwd), lastModified: 0, sessions: 0 };
-      p.sessions += 1;
-      p.lastModified = Math.max(p.lastModified, s.lastModified || 0);
-      byDir.set(s.cwd, p);
+  const lists = await Promise.allSettled((await availableBackends()).map((b) => b.listSessions()));
+  for (const r of lists) {
+    if (r.status === 'rejected') {
+      console.error('listSessions failed:', r.reason);
+      continue;
     }
-  } catch (err) {
-    console.error('listSessions failed:', err);
+    for (const s of r.value) {
+      if (!s.dir || !fs.existsSync(s.dir)) continue;
+      const p = byDir.get(s.dir) || { dir: s.dir, name: path.basename(s.dir), lastModified: 0, sessions: 0 };
+      p.sessions += 1;
+      p.lastModified = Math.max(p.lastModified, s.updatedAt || 0);
+      byDir.set(s.dir, p);
+    }
   }
   return [...byDir.values()].sort((a, b) => b.lastModified - a.lastModified || a.name.localeCompare(b.name));
 }
 
-// ---------- usage ----------
-
-// Plan limits and spend come from a short-lived idle query (no turn is run).
-// Cached briefly so repeatedly opening the panel doesn't spawn processes.
-let usageCache = { at: 0, data: null };
-
-async function getUsage() {
-  if (usageCache.data && Date.now() - usageCache.at < 30_000) return usageCache.data;
-  const idle = (async function* () {
-    await new Promise(() => {});
-  })();
-  const q = query({ prompt: idle, options: { cwd: os.homedir() } });
-  try {
-    const data = await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
-    usageCache = { at: Date.now(), data };
-    return data;
-  } finally {
-    q.close();
-  }
-}
-
-// What "Default model" / "Default effort" resolve to, from the user's Claude
-// Code settings. Project-level settings overrides aren't considered.
-let defaultsCache = null;
-
-async function getDefaults() {
-  if (defaultsCache) return defaultsCache;
-  let settings = {};
-  try {
-    settings = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf8'));
-  } catch {}
-  const idle = (async function* () {
-    await new Promise(() => {});
-  })();
-  const q = query({ prompt: idle, options: { cwd: os.homedir() } });
-  try {
-    const models = await q.supportedModels();
-    const wanted = settings.model || 'default';
-    const hit = models.find((m) => m.value === wanted || m.resolvedModel === wanted) || models.find((m) => m.value === 'default');
-    const resolved = hit?.resolvedModel || null;
-    const perModel = Object.entries(settings.modelSettings || {}).find(([k]) => resolved && resolved.startsWith(k));
-    const effort = perModel?.[1]?.effortLevel || settings.effortLevel || null;
-    defaultsCache = { model: resolved, modelName: hit?.displayName || null, effort, models };
-    return defaultsCache;
-  } finally {
-    q.close();
-  }
-}
-
-// ---------- tags ----------
-
-// Chat tags live in a sidecar file rather than in the transcripts, because
-// Claude Code's own session tag holds only one string. Shape:
-//   { sessions: { [sessionId]: string[] }, quick: string[] }
-// `quick` is the saved list offered as one-click choices in the tag editor.
-const TAGS_FILE = path.join(os.homedir(), '.claude-web', 'tags.json');
-const MAX_TAGS = 10;
-const MAX_QUICK = 50;
-const MAX_TAG_LEN = 30;
-
-let tagStore = { sessions: {}, quick: [] };
-try {
-  const raw = JSON.parse(fs.readFileSync(TAGS_FILE, 'utf8'));
-  if (raw.sessions) tagStore = { sessions: raw.sessions, quick: raw.quick || [] };
-  else tagStore = { sessions: raw, quick: [...new Set(Object.values(raw).flat())] }; // first version: bare map
-} catch {}
-
-function normalizeTags(list, max) {
+// Every agent's conversations in one folder, newest first.
+async function listConversations(dir) {
   const out = [];
-  for (const raw of list) {
-    const t = String(raw).trim().replace(/\s+/g, ' ').slice(0, MAX_TAG_LEN);
-    if (t && !out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t);
+  for (const b of await availableBackends()) {
+    let sessions = [];
+    try {
+      sessions = await b.listSessions(dir);
+    } catch (err) {
+      console.error(`${b.id} listSessions failed:`, err);
+    }
+    for (const s of sessions) {
+      const key = `${b.id}:${s.id}`;
+      out.push({ ...s, agent: b.id, key, running: !!hub.get(key)?.running, tags: tagsOf(b.id, s.id) });
+    }
   }
-  return out.slice(0, max);
-}
-
-function saveTags() {
-  fs.mkdirSync(path.dirname(TAGS_FILE), { recursive: true });
-  const tmp = TAGS_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(tagStore, null, 2));
-  fs.renameSync(tmp, TAGS_FILE);
-}
-
-function setTags(sessionId, list) {
-  if (list.length) tagStore.sessions[sessionId] = list;
-  else delete tagStore.sessions[sessionId];
-  // Anything applied to a chat is remembered as a quick tag.
-  tagStore.quick = normalizeTags([...tagStore.quick, ...list], MAX_QUICK);
-  saveTags();
+  out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  // Brand-new conversations that haven't reported an id yet.
+  for (const c of hub.starting(dir)) {
+    out.unshift({ agent: c.agent, id: null, key: c.key, title: '(starting…)', updatedAt: Date.now(), running: true, tags: [] });
+  }
+  return out;
 }
 
 // ---------- http ----------
@@ -375,8 +165,18 @@ function validImages(list) {
   );
 }
 
-const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
-const MODES = new Set(['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto']);
+const NAME = /^[\w.\/:@\[\]-]{1,200}$/; // model and effort values
+const SESSION_ID = /^[\w-]+$/;
+
+function validAnswers(a) {
+  return a === undefined || (Array.isArray(a) && a.every((x) => Array.isArray(x) && x.every((s) => typeof s === 'string')));
+}
+
+async function backendFor(agent) {
+  const b = backends.get(agent);
+  if (!b || !(await availableBackends()).includes(b)) return null;
+  return b;
+}
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -412,137 +212,117 @@ const server = http.createServer(async (req, res) => {
         connection: 'keep-alive',
       });
       res.write(': hi\n\n');
-      clients.add(res);
+      hub.clients.add(res);
       const ping = setInterval(() => res.write(': ping\n\n'), 20000);
       req.on('close', () => {
         clearInterval(ping);
-        clients.delete(res);
+        hub.clients.delete(res);
       });
       return;
     }
 
-    if (p === '/api/defaults') return send(res, 200, await getDefaults());
+    if (p === '/api/agents') {
+      return send(res, 200, (await availableBackends()).map((b) => ({ id: b.id, label: b.label })));
+    }
 
-    if (p === '/api/usage') return send(res, 200, await getUsage());
+    if (p === '/api/options') {
+      const backend = await backendFor(url.searchParams.get('agent'));
+      if (!backend) return send(res, 404, { error: 'Unknown agent' });
+      return send(res, 200, await backend.options());
+    }
+
+    if (p === '/api/usage') {
+      const backend = await backendFor(url.searchParams.get('agent') || 'claude');
+      if (!backend?.usage) return send(res, 404, { error: 'No usage for this agent' });
+      return send(res, 200, await backend.usage());
+    }
 
     if (p === '/api/projects') return send(res, 200, await listProjects());
 
-    if (p === '/api/sessions') {
-      const dir = url.searchParams.get('dir');
-      const sessions = (await listSessions({ dir })).filter((s) => !s.cwd || s.cwd === dir);
-      const out = sessions
-        .sort((a, b) => b.lastModified - a.lastModified)
-        .map((s) => ({ ...s, running: !!live.get(s.sessionId)?.running, tags: tagStore.sessions[s.sessionId] || [] }));
-      // Brand-new conversations that haven't reported an id yet.
-      for (const st of live.values()) {
-        if (!st.sessionId && st.dir === dir && st.running) {
-          out.unshift({ sessionId: null, key: st.key, summary: '(starting…)', lastModified: Date.now(), running: true });
-        }
-      }
-      return send(res, 200, out);
-    }
+    if (p === '/api/sessions') return send(res, 200, await listConversations(url.searchParams.get('dir')));
 
-    const m = p.match(/^\/api\/sessions\/([\w-]+)$/);
+    const m = p.match(/^\/api\/sessions\/([\w-]+)\/([\w-]+)$/);
     if (m && req.method === 'GET') {
-      const key = m[1];
+      const [, agent, id] = m;
+      const backend = await backendFor(agent);
+      if (!backend) return send(res, 404, { error: 'Unknown agent' });
       const dir = url.searchParams.get('dir') || undefined;
-      const state = live.get(key);
-      const messages = state?.sessionId || !state ? await getSessionMessages(key, { dir }) : [];
-      // While a turn is running, transcript-on-disk may lag; the client
-      // replays the buffer on top and de-duplicates by uuid.
-      return send(res, 200, {
-        messages,
-        live: state ? { ...statusOf(state), buffer: state.running ? state.buffer : [] } : null,
-      });
+      // `id` is a session id, or a temp key while a new conversation starts.
+      const conv = hub.get(id) || hub.find(agent, id);
+      const items = conv && !conv.sessionId ? [] : await backend.history(conv?.sessionId || id, dir);
+      // While a turn is running the history may lag; the browser merges the
+      // live items on top by id.
+      return send(res, 200, { items, live: conv ? hub.snapshot(conv) : null });
     }
 
     if (p === '/api/send' && req.method === 'POST') {
-      const { sessionId, dir, text = '', images = [], mode = 'default', model, effort } = await readJson(req, 80_000_000);
+      const { agent = 'claude', sessionId, key, dir, text = '', images = [], mode, model, effort } = await readJson(req, 80_000_000);
+      const backend = await backendFor(agent);
+      if (!backend) return send(res, 400, { error: 'Unknown agent' });
       if (typeof text !== 'string') return send(res, 400, { error: 'Bad message' });
       if (!validImages(images)) {
         return send(res, 400, { error: `Images must be PNG, JPEG, GIF or WebP, at most ${MAX_IMAGES}, each under 5 MB.` });
       }
       if (!text.trim() && !images.length) return send(res, 400, { error: 'Empty message' });
-      if (!MODES.has(mode)) return send(res, 400, { error: 'Bad mode' });
-      if (effort && !EFFORTS.has(effort)) return send(res, 400, { error: 'Bad effort' });
+      if (sessionId != null && (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId))) {
+        return send(res, 400, { error: 'Bad session' });
+      }
+      if (key != null && (typeof key !== 'string' || !/^new-[\w-]{1,64}$/.test(key))) return send(res, 400, { error: 'Bad key' });
+      const opts = await backend.options();
+      const settings = { mode: mode || opts.defaultMode, model, effort };
+      if (!opts.modes.some((x) => x.value === settings.mode)) return send(res, 400, { error: 'Bad mode' });
+      if ((model && !NAME.test(model)) || (effort && !NAME.test(effort))) return send(res, 400, { error: 'Bad model or effort' });
       if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
         return send(res, 400, { error: 'Project folder not found' });
       }
-      let state = sessionId ? live.get(sessionId) : null;
-      if (state?.running) {
-        return send(res, 409, { error: 'Claude is still working on this conversation. Wait for it to finish or press Stop.' });
+      try {
+        return send(res, 200, { key: hub.start(backend, { sessionId, key, dir, text, images, settings }) });
+      } catch (err) {
+        if (err instanceof BusyError) return send(res, 409, { error: err.message });
+        throw err;
       }
-      if (!state) {
-        const key = sessionId || `new-${crypto.randomUUID()}`;
-        state = { key, sessionId: sessionId || null, dir, running: false, query: null, mode, buffer: [], pending: new Map() };
-        live.set(key, state);
-      }
-      state.dir = dir;
-      runTurn(state, text, images, mode, model, effort);
-      return send(res, 200, { key: state.key });
     }
 
     if (p === '/api/permission' && req.method === 'POST') {
       const { key, id, allow, always, message, answers } = await readJson(req);
-      const state = live.get(key);
-      const pending = state?.pending.get(id);
-      if (!pending) return send(res, 404, { error: 'This request was already answered.' });
-      state.pending.delete(id);
-      if (allow) {
-        const result = { behavior: 'allow', updatedInput: pending.request.input };
-        if (answers) result.updatedInput = { ...pending.request.input, answers };
-        if (always && pending.suggestions) result.updatedPermissions = pending.suggestions;
-        pending.resolve(result);
-      } else {
-        pending.resolve({ behavior: 'deny', message: message || 'The user denied this action.' });
-      }
-      emit(state, { type: 'permission_answered', id, allow: !!allow });
-      emit(state, statusOf(state));
+      if (!validAnswers(answers)) return send(res, 400, { error: 'Bad answers' });
+      const answer = { allow: !!allow, always: !!always, message: typeof message === 'string' ? message : undefined, answers };
+      if (!hub.answer(key, id, answer)) return send(res, 404, { error: 'This request was already answered.' });
       return send(res, 200, { ok: true });
     }
 
     if (p === '/api/interrupt' && req.method === 'POST') {
       const { key } = await readJson(req);
-      const state = live.get(key);
-      if (!state?.running || !state.query) return send(res, 200, { ok: true });
-      try {
-        await state.query.interrupt();
-      } catch {
-        state.query.close();
-      }
+      await hub.interrupt(key);
+      return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/mode' && req.method === 'POST') {
+      const { key, mode } = await readJson(req);
+      const conv = hub.get(key);
+      const opts = conv && (await backends.get(conv.agent).options());
+      if (conv && !opts.modes.some((x) => x.value === mode)) return send(res, 400, { error: 'Bad mode' });
+      await hub.setMode(key, mode);
       return send(res, 200, { ok: true });
     }
 
     if (p === '/api/tags' && req.method === 'POST') {
-      const { sessionId, dir, tags: list } = await readJson(req);
-      if (typeof sessionId !== 'string' || !/^[\w-]+$/.test(sessionId)) return send(res, 400, { error: 'Bad session' });
+      const { agent = 'claude', sessionId, dir, tags: list } = await readJson(req);
+      if (!backends.has(agent)) return send(res, 400, { error: 'Unknown agent' });
+      if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) return send(res, 400, { error: 'Bad session' });
       if (!Array.isArray(list)) return send(res, 400, { error: 'Bad tags' });
-      const clean = normalizeTags(list, MAX_TAGS);
-      setTags(sessionId, clean);
-      broadcast({ type: 'sessions_changed', dir });
-      return send(res, 200, { tags: clean, quick: tagStore.quick });
+      const tags = setTags(agent, sessionId, list);
+      hub.broadcast({ type: 'sessions_changed', dir });
+      return send(res, 200, { tags, quick: quickTags() });
     }
 
     if (p === '/api/quicktags') {
       if (req.method === 'POST') {
         const { quick } = await readJson(req);
         if (!Array.isArray(quick)) return send(res, 400, { error: 'Bad tags' });
-        tagStore.quick = normalizeTags(quick, MAX_QUICK);
-        saveTags();
+        setQuickTags(quick);
       }
-      return send(res, 200, { quick: tagStore.quick });
-    }
-
-    if (p === '/api/mode' && req.method === 'POST') {
-      const { key, mode } = await readJson(req);
-      if (!MODES.has(mode)) return send(res, 400, { error: 'Bad mode' });
-      const state = live.get(key);
-      if (state) {
-        state.mode = mode;
-        if (state.running && state.query) await state.query.setPermissionMode(mode).catch(() => {});
-        emit(state, statusOf(state));
-      }
-      return send(res, 200, { ok: true });
+      return send(res, 200, { quick: quickTags() });
     }
 
     return send(res, 404, { error: 'Not found' });
@@ -558,7 +338,11 @@ server.listen(PORT, HOST, () => {
   if (name) console.log(`Open from other devices: http://${name}:${PORT}  (or http://${name.split('.')[0]}:${PORT})`);
   console.log(PASSWORD ? 'Password protection: on' : 'Password protection: off (set PASSWORD to enable)');
   console.log(`Project roots: ${PROJECT_ROOTS.join(', ')}`);
+  availableBackends().then((list) => console.log(`Agents: ${list.map((b) => b.label).join(', ')}`));
 });
+
+// Exit through process.exit so agents' child processes are cleaned up.
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));
 
 // Also answer on localhost so it can be opened on the host itself.
 if (HOST !== '127.0.0.1' && HOST !== 'localhost' && HOST !== '0.0.0.0' && HOST !== '::') {

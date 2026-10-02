@@ -1,16 +1,17 @@
 # claude-web
 
-A small web page for driving Claude Code conversations on this machine from any
-other device on your Tailscale network.
+A small web page for driving coding-agent conversations (Claude Code and
+opencode) on this machine from any other device on your Tailscale network.
 
-Claude, your code, and the conversation history all stay on the host machine.
+The agents, your code, and the conversation history all stay on the host machine.
 Other laptops or phones just open a web page. Every device sees the same live
 conversation, including streaming replies and permission prompts, so you can
 start something on one laptop and approve or continue it from another.
 
-Conversations are the regular Claude Code sessions in `~/.claude/projects`, so
-ones started in the terminal or the desktop app show up here too, and ones
-started here can be resumed with `claude --resume`.
+Conversations are each agent's own sessions: Claude Code's in
+`~/.claude/projects` and opencode's in its own store. Ones started in the
+terminal or the desktop app show up here too, and ones started here can be
+resumed there (`claude --resume`, or the session list in opencode).
 
 ## Run
 
@@ -27,7 +28,8 @@ try HTTPS on a bare `100.x` IP. Always type the `http://` prefix. It
 also answers on `http://localhost:7878` on the host itself.
 
 Requires Node 18+ and Claude Code being logged in on the host (the server uses
-the same login).
+the same login). opencode is optional: if it is installed, it shows up as a
+second agent and uses opencode's own login and providers.
 
 ### Options (environment variables)
 
@@ -37,10 +39,31 @@ the same login).
 | `PORT`          | `7878`                      | Port to listen on.                                           |
 | `HOST`          | Tailscale IP, else 127.0.0.1 | Address to bind.                                            |
 | `PROJECT_ROOTS` | `~/code`                    | `:`-separated folders whose subfolders appear as projects.   |
+| `OPENCODE_BIN`  | `opencode` on `PATH`, else `~/.opencode/bin/opencode` | opencode binary to start.            |
+| `OPENCODE_URL`  | none                        | Use an already running `opencode serve` instead of starting one (with `OPENCODE_SERVER_PASSWORD` if it has one). |
 
 ```bash
 PASSWORD='something-long' npm start
 ```
+
+## Agents
+
+The sidebar lists every agent's conversations for the project together, each
+marked with its agent. When more than one agent is installed, a picker next to
+the mode menu chooses the agent for a new conversation; an existing
+conversation always continues with the agent it started with. The mode, model
+and effort menus show what the chosen agent offers:
+
+- **Claude Code**: its permission modes, models and effort levels. The
+  **Usage** panel shows the plan limits of the Claude login.
+- **opencode**: *Ask before actions* runs opencode's `build` agent but asks
+  before file edits and shell commands; the other modes are opencode's own
+  agents (`build`, `plan`, …) with the permissions configured for them. Models
+  are the ones from opencode's connected providers, and effort lists the
+  selected model's variants.
+
+For opencode the server starts a private `opencode serve` on localhost the
+first time it is needed and stops it when the server exits.
 
 ## Tags
 
@@ -50,8 +73,8 @@ Hover a conversation in the sidebar and click the tag button to edit its tags
 tag; the × next to a quick tag forgets it (chats keep the tags they already
 have). Tags show under the chat, and a row of tag chips above the list filters
 it. Everything is saved on the host in `~/.claude-web/tags.json`, so every
-device sees the same tags and quick tags. They are not written into the Claude
-Code transcripts.
+device sees the same tags and quick tags. They are not written into the agents'
+transcripts.
 
 ## Images
 
@@ -62,16 +85,26 @@ the conversation and can be sent with or without text.
 
 ## How turns work
 
-- One conversation runs one turn at a time. While Claude is working, sending
+- One conversation runs one turn at a time. While the agent is working, sending
   from another device is refused until the turn finishes or someone presses
   **Stop**. The lock releases itself when the turn ends, so taking turns across
   devices needs no extra step.
 - Permission prompts (file edits, shell commands, plan approval, questions)
   appear on every connected device; whichever answers first wins.
 - Pick the permission mode per message from the dropdown next to Send.
-- Avoid having the same conversation open in this web UI *and* in a terminal or
-  desktop-app Claude session at the same time: each process keeps its own copy
-  in memory and they will not see each other's new messages.
+- Avoid having the same conversation open in this web UI *and* in a terminal,
+  desktop-app or opencode TUI session at the same time: each process keeps its
+  own copy in memory and they will not see each other's new messages.
+
+## Code layout
+
+- `server.mjs`: HTTP routes, login, projects.
+- `lib/hub.mjs`: live conversations, the one-turn lock, permission prompts and
+  the event stream every browser listens to. It doesn't depend on the agent.
+- `lib/items.mjs`: the agent-neutral transcript format the page renders.
+- `lib/agents/`: one adapter per agent (`claude.mjs`, `opencode.mjs`). The
+  interface they implement is described in `lib/agents/index.mjs`; adding an
+  agent means adding a file there and listing it.
 
 ## Keep it running (optional)
 

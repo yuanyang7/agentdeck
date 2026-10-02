@@ -4,17 +4,24 @@ const $ = (id) => document.getElementById(id);
 
 const ui = {
   dir: null,
-  key: null, // current conversation: sessionId, or temp key while starting
+  agent: null, // agent of the open conversation, or the one a new one will use
+  key: null, // live key: 'agent:sessionId', or a temp 'new-…' key while starting
   sessionId: null,
   running: false,
+  mode: null, // mode reported by the live conversation, if any
   pending: [],
   sessions: [],
   tagFilter: null, // tag the chat list is filtered to, or null
-  toolCards: new Map(), // tool_use_id -> element
-  seen: new Set(), // message uuids already rendered
-  streamEl: null,
-  streamText: '',
+  agents: [], // [{ id, label }] available on the host
+  options: new Map(), // agent -> composer options from the server
+  items: new Map(), // id -> transcript item (see lib/items.mjs)
+  els: new Map(), // id -> rendered element
 };
+
+// crypto.randomUUID needs a secure context, which plain http on the tailnet isn't.
+const randomId = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+const agentLabel = (id) => ui.agents.find((a) => a.id === id)?.label || id;
 
 // ---------- api ----------
 
@@ -37,12 +44,16 @@ async function api(path, body) {
 
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
-  return { dir: h.get('dir'), s: h.get('s') };
+  // Links from before there were several agents have no `a`; those are Claude.
+  return { dir: h.get('dir'), agent: h.get('a') || 'claude', s: h.get('s') };
 }
 function writeHash() {
   const h = new URLSearchParams();
   if (ui.dir) h.set('dir', ui.dir);
-  if (ui.sessionId) h.set('s', ui.sessionId);
+  if (ui.sessionId) {
+    h.set('a', ui.agent);
+    h.set('s', ui.sessionId);
+  }
   history.replaceState(null, '', '#' + h.toString());
 }
 
@@ -205,7 +216,7 @@ $('tag-form').addEventListener('submit', async (e) => {
   addDraftTag(); // whatever is still in the input counts
   const s = tagEd.session;
   try {
-    const r = await api('/api/tags', { sessionId: s.sessionId, dir: ui.dir, tags: tagEd.draft });
+    const r = await api('/api/tags', { agent: s.agent, sessionId: s.id, dir: ui.dir, tags: tagEd.draft });
     s.tags = r.tags;
     $('tag-dialog').close();
     renderSessions();
@@ -240,8 +251,7 @@ function renderSessions() {
   for (const s of ui.sessions) {
     if (ui.tagFilter && !(s.tags || []).includes(ui.tagFilter)) continue;
     const li = document.createElement('li');
-    const id = s.sessionId || s.key;
-    if (id === ui.key) li.classList.add('active');
+    if (s.key === ui.key) li.classList.add('active');
     const t = document.createElement('div');
     t.className = 's-title';
     if (s.running) {
@@ -249,17 +259,17 @@ function renderSessions() {
       d.className = 'dot';
       t.appendChild(d);
     }
-    t.appendChild(document.createTextNode(s.customTitle || s.summary || s.firstPrompt || 'Untitled'));
-    const meta = document.createElement('div');
-    meta.className = 's-meta';
-    meta.textContent = [timeAgo(s.lastModified), s.gitBranch].filter(Boolean).join(' · ');
+    t.appendChild(document.createTextNode(s.title || 'Untitled'));
+    const meta = el('div', 's-meta');
+    if (ui.agents.length > 1) meta.appendChild(el('span', 'agent-badge', agentLabel(s.agent)));
+    meta.appendChild(document.createTextNode([timeAgo(s.updatedAt), s.branch].filter(Boolean).join(' · ')));
     li.append(t, meta);
     if (s.tags?.length) {
       const row = el('div', 's-tags');
       for (const tag of s.tags) row.appendChild(el('span', 'tag', tag));
       li.appendChild(row);
     }
-    if (s.sessionId) {
+    if (s.id) {
       const b = el('button', 's-tag-btn', '🏷');
       b.type = 'button';
       b.title = 'Edit tags';
@@ -270,7 +280,7 @@ function renderSessions() {
       li.appendChild(b);
     }
     li.onclick = () => {
-      openConversation(id);
+      openConversation(s.agent, s.id || s.key);
       $('sidebar').classList.remove('open');
     };
     ul.appendChild(li);
@@ -289,10 +299,9 @@ $('toggle-sidebar').addEventListener('click', () => $('sidebar').classList.toggl
 
 function resetView() {
   $('messages').innerHTML = '';
-  ui.toolCards.clear();
-  ui.seen.clear();
-  ui.streamEl = null;
-  ui.streamText = '';
+  ui.items.clear();
+  ui.els.clear();
+  ui.mode = null;
   ui.pending = [];
   renderPending();
 }
@@ -305,26 +314,31 @@ function newConversation() {
   $('messages').innerHTML = '<div class="empty">Start a new conversation in this project.</div>';
   $('title').textContent = 'New conversation';
   $('subtitle').textContent = ui.dir || '';
+  selectAgent(localStorage.getItem('cw_agent'));
   setRunning(false);
   renderSessions();
   writeHash();
 }
 
-async function openConversation(id) {
-  ui.key = id;
-  ui.sessionId = id.startsWith('new-') ? null : id;
+// `id` is a session id, or the temp key of a conversation that is starting.
+async function openConversation(agent, id) {
+  const temp = id.startsWith('new-');
+  ui.key = temp ? id : `${agent}:${id}`;
+  ui.sessionId = temp ? null : id;
+  const key = ui.key;
   resetView();
+  selectAgent(agent);
   writeHash();
   renderSessions();
-  const s = ui.sessions.find((x) => (x.sessionId || x.key) === id);
-  $('title').textContent = s ? (s.customTitle || s.summary || 'Conversation') : 'Conversation';
+  const s = ui.sessions.find((x) => x.key === key);
+  $('title').textContent = s?.title || 'Conversation';
   $('subtitle').textContent = ui.dir;
 
-  const data = await api(`/api/sessions/${encodeURIComponent(id)}?dir=${encodeURIComponent(ui.dir)}`);
-  if (ui.key !== id) return;
-  for (const m of data.messages) renderMessage(m);
+  const data = await api(`/api/sessions/${agent}/${encodeURIComponent(id)}?dir=${encodeURIComponent(ui.dir)}`);
+  if (ui.key !== key) return;
+  for (const item of data.items) upsert(item);
   if (data.live) {
-    for (const ev of data.live.buffer || []) handleTurnEvent(ev, true);
+    for (const item of data.live.items) upsert(item);
     applyStatus(data.live);
   } else {
     setRunning(false);
@@ -356,38 +370,9 @@ function scrollToBottom(force) {
 
 function append(node) {
   const stick = nearBottom();
-  const empty = $('messages').querySelector('.empty');
-  if (empty) empty.remove();
-  if (ui.streamEl && ui.streamEl.parentNode) {
-    $('messages').insertBefore(node, ui.streamEl);
-  } else {
-    $('messages').appendChild(node);
-  }
+  $('messages').querySelector('.empty')?.remove();
+  $('messages').appendChild(node);
   if (stick) scrollToBottom(true);
-}
-
-function toolArg(name, input) {
-  if (!input || typeof input !== 'object') return '';
-  const pick =
-    input.command ?? input.file_path ?? input.path ?? input.pattern ?? input.url ??
-    input.query ?? input.description ?? input.prompt ?? input.skill ?? '';
-  let arg = String(pick).split('\n')[0];
-  if (ui.dir) arg = arg.split(ui.dir + '/').join('');
-  return arg.slice(0, 160);
-}
-
-function stringifyResult(content) {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((c) => (c.type === 'text' ? c.text : c.type === 'image' ? '[image]' : JSON.stringify(c)))
-      .join('\n');
-  }
-  return JSON.stringify(content, null, 2);
-}
-
-function stripMeta(text) {
-  return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
 }
 
 // A user bubble: optional image thumbnails (click to open full size) and text.
@@ -407,172 +392,97 @@ function userBubble(text, images) {
   return d;
 }
 
-function imageSrc(b) {
-  const s = b.source || {};
-  return s.type === 'base64' ? `data:${s.media_type};base64,${s.data}` : s.type === 'url' ? s.url : null;
-}
+const TOOL_STATE = { running: '…', done: 'done', error: 'error' };
 
-function renderMessage(m) {
-  if (m.uuid) {
-    if (ui.seen.has(m.uuid)) return;
-    ui.seen.add(m.uuid);
-  }
-  if (m.parent_tool_use_id) return; // subagent internals
-  const msg = m.message || {};
-  const content = typeof msg.content === 'string' ? [{ type: 'text', text: msg.content }] : msg.content || [];
-
-  if (m.type === 'user') {
-    // Images and text from one prompt share a bubble.
-    const images = content.filter((b) => b.type === 'image').map(imageSrc).filter(Boolean);
-    let imagesShown = false;
-    for (const b of content) {
-      if (b.type === 'tool_result') {
-        attachToolResult(b);
-      } else if (b.type === 'text') {
-        const t = stripMeta(b.text);
-        if (!t || /^<(command-|local-command-)/.test(t) || t.startsWith('[Request interrupted')) {
-          if (t.startsWith('[Request interrupted')) append(el('div', 'result-line', 'Interrupted'));
-          continue;
-        }
-        append(userBubble(t, imagesShown ? [] : images));
-        imagesShown = true;
-      }
+function renderItem(item) {
+  switch (item.kind) {
+    case 'user':
+      return userBubble(item.text || '', item.images || []);
+    case 'text': {
+      const d = el('div', 'msg-assistant');
+      d.innerHTML = md(item.text);
+      return d;
     }
-    if (!imagesShown && images.length) append(userBubble('', images));
-    return;
-  }
-
-  if (m.type === 'assistant') {
-    for (const b of content) {
-      if (b.type === 'text') {
-        clearStream();
-        const d = el('div', 'msg-assistant');
-        d.innerHTML = md(b.text);
-        append(d);
-      } else if (b.type === 'thinking' && b.thinking) {
-        const d = el('details', 'tool');
-        const s = el('summary');
-        s.appendChild(el('span', 'thinking', 'Thinking'));
-        d.appendChild(s);
-        const body = el('div', 't-body');
-        body.appendChild(el('div', 'thinking', b.thinking));
-        d.appendChild(body);
-        append(d);
-      } else if (b.type === 'tool_use') {
-        clearStream();
-        renderToolUse(b);
-      }
+    case 'thinking': {
+      const d = el('details', 'tool' + (item.text ? '' : ' hidden'));
+      const s = el('summary');
+      s.appendChild(el('span', 'thinking', 'Thinking'));
+      const body = el('div', 't-body');
+      body.appendChild(el('div', 'thinking', item.text || ''));
+      d.append(s, body);
+      return d;
     }
+    case 'tool': {
+      const d = el('details', 'tool' + (item.status === 'error' ? ' err' : ''));
+      const s = el('summary');
+      s.appendChild(el('span', 't-name', item.name || 'Tool'));
+      if (item.summary) s.appendChild(el('span', 't-arg', '  ' + item.summary));
+      s.appendChild(el('span', 't-state', TOOL_STATE[item.status] || '…'));
+      const body = el('div', 't-body');
+      if (item.detail) body.appendChild(el('pre', '', item.detail));
+      if (item.output) body.appendChild(el('pre', '', item.output));
+      d.append(s, body);
+      return d;
+    }
+    case 'notice':
+      return el('div', 'result-line' + (item.error ? ' err' : ''), item.text);
   }
+  return el('div', 'hidden');
 }
 
-function renderToolUse(b) {
-  const d = el('details', 'tool');
-  const s = el('summary');
-  s.appendChild(el('span', 't-name', b.name));
-  const arg = toolArg(b.name, b.input);
-  if (arg) s.appendChild(el('span', 't-arg', '  ' + arg));
-  const st = el('span', 't-state', '…');
-  s.appendChild(st);
-  d.appendChild(s);
-  const body = el('div', 't-body');
-  let shown = b.input;
-  if (b.name === 'Edit' && b.input) {
-    shown = `${b.input.file_path}\n--- old\n${b.input.old_string}\n+++ new\n${b.input.new_string}`;
-  } else if (b.name === 'Write' && b.input) {
-    shown = `${b.input.file_path}\n\n${b.input.content}`;
-  } else if (b.name === 'Bash' && b.input) {
-    shown = '$ ' + b.input.command;
+// Adds an item, or merges it into the one with the same id and redraws that
+// in place. `replaces` swaps out an earlier item (a streamed draft).
+function upsert(patch) {
+  const item = { ...ui.items.get(patch.id), ...patch };
+  let old = ui.els.get(item.id);
+  const draft = item.replaces && ui.els.get(item.replaces);
+  if (draft) {
+    ui.els.delete(item.replaces);
+    ui.items.delete(item.replaces);
+    if (old) draft.remove();
+    else old = draft;
   }
-  body.appendChild(el('pre', '', typeof shown === 'string' ? shown : JSON.stringify(shown, null, 2)));
-  d.appendChild(body);
-  ui.toolCards.set(b.id, d);
-  append(d);
+  ui.items.set(item.id, item);
+  const node = renderItem(item);
+  if (old) {
+    if (old.open) node.open = true;
+    const stick = nearBottom();
+    old.replaceWith(node);
+    if (stick) scrollToBottom(true);
+  } else {
+    append(node);
+  }
+  ui.els.set(item.id, node);
 }
 
-function attachToolResult(b) {
-  const card = ui.toolCards.get(b.tool_use_id);
-  const text = stringifyResult(b.content);
-  if (!card) return;
-  const st = card.querySelector('.t-state');
-  if (st) st.textContent = b.is_error ? 'error' : 'done';
-  if (b.is_error) card.classList.add('err');
-  const body = card.querySelector('.t-body');
-  const pre = el('pre', '', text.length > 20000 ? text.slice(0, 20000) + '\n… (truncated)' : text);
-  body.appendChild(pre);
-}
-
-function clearStream() {
-  if (ui.streamEl) ui.streamEl.remove();
-  ui.streamEl = null;
-  ui.streamText = '';
-}
-
-let streamRaf = 0;
-function addDelta(text) {
-  ui.streamText += text;
-  if (!ui.streamEl) {
-    ui.streamEl = el('div', 'msg-assistant');
-    const empty = $('messages').querySelector('.empty');
-    if (empty) empty.remove();
-    $('messages').appendChild(ui.streamEl);
-  }
-  if (!streamRaf) {
-    streamRaf = requestAnimationFrame(() => {
-      streamRaf = 0;
-      if (!ui.streamEl) return;
-      const stick = nearBottom();
-      ui.streamEl.innerHTML = md(ui.streamText);
-      if (stick) scrollToBottom(true);
-    });
-  }
+// Streamed text is applied at most once per frame.
+const dirty = new Set();
+let deltaRaf = 0;
+function applyDelta(id, text) {
+  const item = ui.items.get(id) || { id, kind: 'text', text: '' };
+  item.text = (item.text || '') + text;
+  ui.items.set(id, item);
+  dirty.add(id);
+  deltaRaf ||= requestAnimationFrame(() => {
+    deltaRaf = 0;
+    for (const d of dirty) if (ui.items.has(d)) upsert(ui.items.get(d));
+    dirty.clear();
+  });
 }
 
 // ---------- live events ----------
 
-function isMine(ev) {
-  return ui.key && (ev.key === ui.key || (ev.sessionId && ev.sessionId === ui.sessionId));
-}
-
-function handleTurnEvent(ev, replay) {
-  switch (ev.type) {
-    case 'user_text': {
-      // On replay the transcript may already contain this prompt.
-      const users = $('messages').querySelectorAll('.msg-user');
-      const last = users[users.length - 1];
-      if (replay && last && last.textContent === ev.text) break;
-      append(userBubble(ev.text, (ev.images || []).map(dataUrl)));
-      break;
-    }
-    case 'delta':
-      addDelta(ev.text);
-      break;
-    case 'message':
-      renderMessage(ev.message);
-      break;
-    case 'result': {
-      clearStream();
-      const parts = [];
-      if (ev.error) parts.push(ev.error);
-      if (ev.duration) parts.push((ev.duration / 1000).toFixed(1) + 's');
-      if (ev.cost) parts.push('$' + ev.cost.toFixed(3));
-      append(el('div', 'result-line' + (ev.error ? ' err' : ''), parts.join(' · ')));
-      break;
-    }
-    case 'error':
-      clearStream();
-      append(el('div', 'result-line err', 'Error: ' + ev.error));
-      break;
-    case 'status':
-      if (!replay) applyStatus(ev);
-      break;
-  }
+function handleTurnEvent(ev) {
+  if (ev.type === 'item') upsert(ev.item);
+  else if (ev.type === 'delta') applyDelta(ev.id, ev.text);
+  else if (ev.type === 'status') applyStatus(ev);
 }
 
 function applyStatus(st) {
-  setRunning(st.running);
-  if (st.mode) $('mode').value = st.mode;
   ui.pending = st.pending || [];
+  setRunning(st.running);
+  ui.mode = st.mode || null;
+  if (st.mode && [...$('mode').options].some((o) => o.value === st.mode)) $('mode').value = st.mode;
   renderPending();
 }
 
@@ -592,8 +502,8 @@ function connectEvents() {
   es.onmessage = (e) => {
     const ev = JSON.parse(e.data);
     if (ev.type === 'session_bound') {
-      if (ui.key === ev.key) {
-        ui.key = ev.sessionId;
+      if (ui.key === ev.oldKey) {
+        ui.key = ev.key;
         ui.sessionId = ev.sessionId;
         writeHash();
       }
@@ -606,7 +516,7 @@ function connectEvents() {
     }
     if (ev.type === 'status' && ev.dir === ui.dir) {
       // Keep running dots in the sidebar fresh for other conversations.
-      const s = ui.sessions.find((x) => (x.sessionId || x.key) === (ev.sessionId || ev.key));
+      const s = ui.sessions.find((x) => x.key === ev.key);
       if (s && s.running !== ev.running) {
         s.running = ev.running;
         renderSessions();
@@ -614,12 +524,12 @@ function connectEvents() {
         loadSessions();
       }
     }
-    if (isMine(ev)) handleTurnEvent(ev, false);
+    if (ui.key && ev.key === ui.key) handleTurnEvent(ev);
   };
   es.onerror = () => {
     // EventSource reconnects on its own; resync the open conversation when it does.
     es.onopen = () => {
-      if (ui.key) openConversation(ui.key);
+      if (ui.key) openConversation(ui.agent, ui.sessionId || ui.key);
       loadSessions();
     };
   };
@@ -630,25 +540,20 @@ function connectEvents() {
 function renderPending() {
   const box = $('pending');
   box.innerHTML = '';
-  setRunningLabel();
+  if (ui.running) setRunning(true);
   for (const p of ui.pending) {
     const card = el('div', 'perm');
-    if (p.toolName === 'AskUserQuestion' && Array.isArray(p.input?.questions)) {
+    if (p.kind === 'question') {
       renderQuestion(card, p);
     } else {
-      card.appendChild(el('h4', '', p.title || `Claude wants to use ${p.toolName}`));
+      card.appendChild(el('h4', '', p.title));
       if (p.reason) card.appendChild(el('div', 'muted', p.reason));
-      let shown = p.input;
-      if (p.toolName === 'Bash') shown = '$ ' + p.input.command;
-      else if (p.toolName === 'ExitPlanMode') shown = p.input.plan;
-      else if (p.toolName === 'Edit') shown = `${p.input.file_path}\n--- old\n${p.input.old_string}\n+++ new\n${p.input.new_string}`;
-      else if (p.toolName === 'Write') shown = `${p.input.file_path}\n\n${p.input.content}`;
       const pre = el('pre');
-      if (p.toolName === 'ExitPlanMode') {
+      if (p.markdown) {
         pre.className = 'msg-assistant';
-        pre.innerHTML = md(shown);
+        pre.innerHTML = md(p.detail);
       } else {
-        pre.textContent = typeof shown === 'string' ? shown : JSON.stringify(shown, null, 2);
+        pre.textContent = p.detail || '';
       }
       card.appendChild(pre);
       const row = el('div', 'row');
@@ -662,7 +567,7 @@ function renderPending() {
       }
       const deny = el('button', 'danger', 'Deny');
       deny.onclick = () => {
-        const why = prompt('Tell Claude what to do instead (optional):') ?? null;
+        const why = prompt(`Tell ${agentLabel(ui.agent)} what to do instead (optional):`) ?? null;
         if (why === null) return;
         answer(p, { allow: false, message: why || undefined });
       };
@@ -673,9 +578,11 @@ function renderPending() {
   }
 }
 
+// Answers go back as one list of chosen labels (or typed text) per question.
 function renderQuestion(card, p) {
-  const answers = {};
-  for (const q of p.input.questions) {
+  if (p.title) card.appendChild(el('div', 'muted', p.title));
+  const answers = p.questions.map(() => []);
+  p.questions.forEach((q, qi) => {
     const wrap = el('div', 'q');
     wrap.appendChild(el('h4', '', q.question));
     const opts = el('div', 'opts');
@@ -687,10 +594,10 @@ function renderQuestion(card, p) {
       b.appendChild(document.createTextNode(o.label));
       if (o.description) b.appendChild(el('span', 'desc', o.description));
       b.onclick = () => {
-        if (!q.multiSelect) picked.clear();
+        if (!q.multiple) picked.clear();
         picked.has(o.label) ? picked.delete(o.label) : picked.add(o.label);
         buttons.forEach((bb) => bb.el.classList.toggle('sel', picked.has(bb.label)));
-        answers[q.question] = [...picked].join(', ');
+        answers[qi] = [...picked];
       };
       buttons.push({ el: b, label: o.label });
       opts.appendChild(b);
@@ -701,12 +608,12 @@ function renderQuestion(card, p) {
     other.oninput = () => {
       picked.clear();
       buttons.forEach((bb) => bb.el.classList.remove('sel'));
-      answers[q.question] = other.value;
+      answers[qi] = other.value ? [other.value] : [];
     };
     opts.appendChild(other);
     wrap.appendChild(opts);
     card.appendChild(wrap);
-  }
+  });
   const row = el('div', 'row');
   const ok = el('button', 'primary', 'Submit answers');
   ok.onclick = () => answer(p, { allow: true, answers });
@@ -716,10 +623,6 @@ function renderQuestion(card, p) {
   card.appendChild(row);
 }
 
-function setRunningLabel() {
-  if (ui.running) setRunning(true);
-}
-
 async function answer(p, body) {
   try {
     await api('/api/permission', { key: ui.key, id: p.id, ...body });
@@ -727,6 +630,85 @@ async function answer(p, body) {
     alert(err.message);
   }
 }
+
+// ---------- agent & options ----------
+
+function fillSelect(sel, entries, value) {
+  sel.innerHTML = '';
+  for (const [v, label] of entries) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = label;
+    sel.appendChild(o);
+  }
+  sel.value = value;
+  if (sel.value !== value) sel.value = entries[0]?.[0] ?? '';
+}
+
+async function loadOptions(agent) {
+  if (!ui.options.has(agent)) ui.options.set(agent, api('/api/options?agent=' + encodeURIComponent(agent)));
+  try {
+    return await ui.options.get(agent);
+  } catch (err) {
+    ui.options.delete(agent);
+    throw err;
+  }
+}
+
+// Makes the composer offer `agent`'s modes, models and efforts. The agent can
+// only be changed for a new conversation.
+async function selectAgent(agent) {
+  if (!ui.agents.some((a) => a.id === agent)) agent = ui.agents[0]?.id || 'claude';
+  ui.agent = agent;
+  $('agent').value = agent;
+  $('agent').disabled = !!ui.key;
+  $('input').placeholder = `Message ${agentLabel(agent)}…  (Enter to send, Shift+Enter for newline)`;
+  let o;
+  try {
+    o = await loadOptions(agent);
+  } catch (err) {
+    $('status').textContent = `${agentLabel(agent)} is unavailable: ${err.message}`;
+    return;
+  }
+  if (ui.agent !== agent) return;
+  fillSelect($('mode'), o.modes.map((m) => [m.value, m.label]), ui.mode || o.defaultMode);
+  fillSelect(
+    $('model'),
+    [['', o.defaultModel ? `Default (${o.defaultModel})` : 'Default model'], ...o.models.map((m) => [m.value, m.label])],
+    localStorage.getItem('cw_model:' + agent) || '',
+  );
+  fillEfforts();
+  $('attach').classList.toggle('hidden', !o.images);
+  $('toggle-usage').classList.toggle('hidden', !o.usage);
+  if (!o.usage) $('usage').classList.add('hidden');
+}
+
+// Some agents have efforts per model, so this follows the model picker.
+async function fillEfforts() {
+  const agent = ui.agent;
+  const o = await loadOptions(agent);
+  const model = o.models.find((m) => m.value === $('model').value) || o.models.find((m) => m.label === o.defaultModel);
+  const efforts = model?.efforts ? model.efforts.map((v) => [v, `${v[0].toUpperCase()}${v.slice(1)} effort`]) : o.efforts.map((e) => [e.value, e.label]);
+  fillSelect(
+    $('effort'),
+    [['', o.defaultEffort ? `Default (${o.defaultEffort})` : 'Default effort'], ...efforts],
+    localStorage.getItem('cw_effort:' + agent) || '',
+  );
+  $('effort').classList.toggle('hidden', !efforts.length);
+}
+
+$('agent').addEventListener('change', () => {
+  localStorage.setItem('cw_agent', $('agent').value);
+  selectAgent($('agent').value);
+});
+
+// The chosen model and effort are remembered per agent in this browser and
+// apply to the next message.
+$('model').addEventListener('change', () => {
+  localStorage.setItem('cw_model:' + ui.agent, $('model').value);
+  fillEfforts();
+});
+$('effort').addEventListener('change', () => localStorage.setItem('cw_effort:' + ui.agent, $('effort').value));
 
 // ---------- composer ----------
 
@@ -845,16 +827,24 @@ $('composer').addEventListener('drop', (e) => {
     addFiles(e.dataTransfer.files);
   }
 });
-
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = input.value.trim();
   if ((!text && !attachments.length) || ui.running || !ui.dir) return;
   $('send').disabled = true;
   const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
+  const isNew = !ui.key;
+  if (isNew) {
+    // Our own temp key, so events sent before the reply already reach us.
+    ui.key = 'new-' + randomId();
+    $('agent').disabled = true;
+    $('title').textContent = text.split('\n')[0].slice(0, 80) || '(image)';
+  }
   try {
-    const { key } = await api('/api/send', {
+    await api('/api/send', {
+      agent: ui.agent,
       sessionId: ui.sessionId,
+      key: isNew ? ui.key : undefined,
       dir: ui.dir,
       text,
       images,
@@ -862,20 +852,17 @@ $('composer').addEventListener('submit', async (e) => {
       model: $('model').value || undefined,
       effort: $('effort').value || undefined,
     });
-    if (!ui.key) {
-      ui.key = key;
-      $('title').textContent = text.split('\n')[0].slice(0, 80) || '(image)';
-      $('messages').innerHTML = '';
-      // The server already broadcast user_text before we knew our key; show it.
-      append(userBubble(text, images.map(dataUrl)));
-      loadSessions();
-    }
+    if (isNew) loadSessions();
     setRunning(true);
     input.value = '';
     attachments.length = 0;
     renderAttachments();
     autosize();
   } catch (err) {
+    if (isNew) {
+      ui.key = null;
+      $('agent').disabled = false;
+    }
     alert(err.message);
     $('send').disabled = false;
   }
@@ -915,7 +902,7 @@ async function loadUsage() {
   const box = $('usage');
   box.textContent = 'Loading usage…';
   try {
-    const u = await api('/api/usage');
+    const u = await api('/api/usage?agent=' + encodeURIComponent(ui.agent));
     box.innerHTML = '';
     const head = u.subscription_type ? `Plan: ${u.subscription_type}` : 'API key / no plan limits';
     box.appendChild(el('div', 'u-head', head));
@@ -943,37 +930,25 @@ $('toggle-usage').addEventListener('click', () => {
   if (!box.classList.contains('hidden')) loadUsage();
 });
 
-// The chosen model is remembered in this browser and applies to the next message.
-$('model').value = localStorage.getItem('cw_model') || '';
-if ($('model').value !== (localStorage.getItem('cw_model') || '')) $('model').value = '';
-$('model').addEventListener('change', () => localStorage.setItem('cw_model', $('model').value));
-$('effort').value = localStorage.getItem('cw_effort') || '';
-if ($('effort').value !== (localStorage.getItem('cw_effort') || '')) $('effort').value = '';
-$('effort').addEventListener('change', () => localStorage.setItem('cw_effort', $('effort').value));
-
-// Make the "Default" entries say what they actually resolve to.
-async function labelDefaults() {
-  const d = await api('/api/defaults');
-  const name = d.models.find((m) => m.resolvedModel === d.model && m.value !== 'default')?.displayName || d.modelName;
-  if (name) $('model').options[0].textContent = `Default (${name})`;
-  if (d.effort) $('effort').options[0].textContent = `Default (${d.effort})`;
-}
-
 // ---------- boot ----------
 
 async function start() {
   const me = await api('/api/me');
   $('app').classList.remove('hidden');
   $('host').textContent = 'Host: ' + me.host;
+  ui.agents = await api('/api/agents');
+  const sel = $('agent');
+  sel.innerHTML = '';
+  for (const a of ui.agents) sel.appendChild(Object.assign(document.createElement('option'), { value: a.id, textContent: a.label }));
+  sel.classList.toggle('hidden', ui.agents.length < 2);
   const projects = await loadProjects();
   const h = readHash();
   const dir = h.dir || projects[0]?.dir;
   if (dir) setProject(dir);
   await loadSessions();
-  if (h.s) await openConversation(h.s);
+  if (h.s) await openConversation(h.agent, h.s);
   else newConversation();
   connectEvents();
-  labelDefaults().catch(() => {});
 }
 
 start().catch((err) => {
