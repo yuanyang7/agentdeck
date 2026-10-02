@@ -1,7 +1,7 @@
 # claude-web
 
-A small web page for driving coding-agent conversations (Claude Code and
-opencode) on this machine from any other device on your Tailscale network.
+A small web page for driving coding-agent conversations (Claude Code, Codex
+and opencode) on this machine from any other device on your Tailscale network.
 
 The agents, your code, and the conversation history all stay on the host machine.
 Other laptops or phones just open a web page. Every device sees the same live
@@ -9,9 +9,10 @@ conversation, including streaming replies and permission prompts, so you can
 start something on one laptop and approve or continue it from another.
 
 Conversations are each agent's own sessions: Claude Code's in
-`~/.claude/projects` and opencode's in its own store. Ones started in the
-terminal or the desktop app show up here too, and ones started here can be
-resumed there (`claude --resume`, or the session list in opencode).
+`~/.claude/projects`, Codex's in `~/.codex` and opencode's in its own store.
+Ones started in the terminal or the desktop apps show up here too, and ones
+started here can be resumed there (`claude --resume`, the Codex app or
+`codex resume`, or the session list in opencode).
 
 ## Run
 
@@ -28,8 +29,10 @@ try HTTPS on a bare `100.x` IP. Always type the `http://` prefix. It
 also answers on `http://localhost:7878` on the host itself.
 
 Requires Node 18+ and Claude Code being logged in on the host (the server uses
-the same login). opencode is optional: if it is installed, it shows up as a
-second agent and uses opencode's own login and providers.
+the same login). Codex and opencode are optional: each one that is installed
+shows up as another agent and uses its own login. Codex runs on the Codex login
+of this machine (your ChatGPT plan, or an API key); opencode uses its own
+providers.
 
 ### Options (environment variables)
 
@@ -39,6 +42,7 @@ second agent and uses opencode's own login and providers.
 | `PORT`          | `7878`                      | Port to listen on.                                           |
 | `HOST`          | Tailscale IP, else 127.0.0.1 | Address to bind.                                            |
 | `PROJECT_ROOTS` | `~/code`                    | `:`-separated folders whose subfolders appear as projects.   |
+| `CODEX_BIN`     | newest of `codex` on `PATH` and the copies inside the ChatGPT / Codex apps | Codex binary to start. |
 | `OPENCODE_BIN`  | `opencode` on `PATH`, else `~/.opencode/bin/opencode` | opencode binary to start.            |
 | `OPENCODE_URL`  | none                        | Use an already running `opencode serve` instead of starting one (with `OPENCODE_SERVER_PASSWORD` if it has one). |
 
@@ -56,14 +60,20 @@ and effort menus show what the chosen agent offers:
 
 - **Claude Code**: its permission modes, models and effort levels. The
   **Usage** panel shows the plan limits of the Claude login.
+- **Codex**: *Ask before actions* (asks before anything but known-safe
+  reads), *Auto (sandboxed)* (Codex's default: works inside the project and
+  asks to go beyond it), *Read only* and *Full access*. Models and effort
+  levels are the ones your Codex login offers, and **Usage** shows the plan's
+  Codex limits.
 - **opencode**: *Ask before actions* runs opencode's `build` agent but asks
   before file edits and shell commands; the other modes are opencode's own
   agents (`build`, `plan`, …) with the permissions configured for them. Models
   are the ones from opencode's connected providers, and effort lists the
   selected model's variants.
 
-For opencode the server starts a private `opencode serve` on localhost the
-first time it is needed and stops it when the server exits.
+For Codex and opencode the server starts a private `codex app-server` /
+`opencode serve` the first time it is needed and stops it when the server
+exits.
 
 ## Tags
 
@@ -102,7 +112,8 @@ the conversation and can be sent with or without text.
 - `lib/hub.mjs`: live conversations, the one-turn lock, permission prompts and
   the event stream every browser listens to. It doesn't depend on the agent.
 - `lib/items.mjs`: the agent-neutral transcript format the page renders.
-- `lib/agents/`: one adapter per agent (`claude.mjs`, `opencode.mjs`). The
+- `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,
+  `opencode.mjs`). The
   interface they implement is described in `lib/agents/index.mjs`; adding an
   agent means adding a file there and listing it.
 

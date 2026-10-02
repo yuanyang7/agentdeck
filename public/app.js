@@ -681,6 +681,7 @@ async function selectAgent(agent) {
   $('attach').classList.toggle('hidden', !o.images);
   $('toggle-usage').classList.toggle('hidden', !o.usage);
   if (!o.usage) $('usage').classList.add('hidden');
+  else if (!$('usage').classList.contains('hidden')) loadUsage();
 }
 
 // Some agents have efforts per model, so this follows the model picker.
@@ -876,13 +877,6 @@ $('mode').addEventListener('change', () => {
 
 // ---------- usage ----------
 
-const LIMIT_LABELS = {
-  five_hour: '5-hour',
-  seven_day: '7-day',
-  seven_day_opus: '7-day Opus',
-  seven_day_sonnet: '7-day Sonnet',
-};
-
 function usageRow(label, pct, resetsAt) {
   const row = el('div', 'u-row');
   row.appendChild(el('span', 'u-label', label));
@@ -904,21 +898,9 @@ async function loadUsage() {
   try {
     const u = await api('/api/usage?agent=' + encodeURIComponent(ui.agent));
     box.innerHTML = '';
-    const head = u.subscription_type ? `Plan: ${u.subscription_type}` : 'API key / no plan limits';
-    box.appendChild(el('div', 'u-head', head));
-    const rl = u.rate_limits;
-    if (u.rate_limits_available && rl) {
-      for (const [k, label] of Object.entries(LIMIT_LABELS)) {
-        if (rl[k] && rl[k].utilization != null) box.appendChild(usageRow(label, rl[k].utilization, rl[k].resets_at));
-      }
-      for (const m of rl.model_scoped || []) {
-        if (m.utilization != null) box.appendChild(usageRow('7-day ' + m.display_name, m.utilization, m.resets_at));
-      }
-      const x = rl.extra_usage;
-      if (x?.is_enabled && x.utilization != null) box.appendChild(usageRow('Extra usage', x.utilization, null));
-    } else {
-      box.appendChild(el('div', 'muted', 'Plan rate limits are not available for this login.'));
-    }
+    box.appendChild(el('div', 'u-head', `${agentLabel(ui.agent)} · ${u.plan ? 'Plan: ' + u.plan : 'API key / no plan limits'}`));
+    for (const l of u.limits) box.appendChild(usageRow(l.label, l.percent, l.resetsAt));
+    if (!u.limits.length) box.appendChild(el('div', 'muted', 'Plan rate limits are not available for this login.'));
   } catch (err) {
     box.textContent = 'Could not load usage: ' + err.message;
   }
