@@ -109,11 +109,25 @@ function rekey(state, sessionId) {
   broadcast({ type: 'session_bound', key: oldKey, sessionId, dir: state.dir });
 }
 
-async function runTurn(state, text, mode, model, effort) {
+// With images the prompt has to be a streamed user message holding image blocks
+// followed by the text; the stream ends after that one message.
+function buildPrompt(state, text, images) {
+  if (!images.length) return text;
+  const content = images.map((img) => ({
+    type: 'image',
+    source: { type: 'base64', media_type: img.mediaType, data: img.data },
+  }));
+  if (text) content.push({ type: 'text', text });
+  return (async function* () {
+    yield { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: state.sessionId || '' };
+  })();
+}
+
+async function runTurn(state, text, images, mode, model, effort) {
   state.running = true;
   state.mode = mode;
   state.buffer = [];
-  emit(state, { type: 'user_text', text });
+  emit(state, { type: 'user_text', text, images });
   emit(state, statusOf(state));
 
   const options = {
@@ -129,7 +143,7 @@ async function runTurn(state, text, mode, model, effort) {
   if (mode === 'bypassPermissions') options.allowDangerouslySkipPermissions = true;
 
   try {
-    const q = query({ prompt: text, options });
+    const q = query({ prompt: buildPrompt(state, text, images), options });
     state.query = q;
     for await (const msg of q) {
       if (msg.session_id && !state.sessionId) rekey(state, msg.session_id);
@@ -339,13 +353,26 @@ function send(res, status, body, headers = {}) {
   res.end(isJson ? JSON.stringify(body) : body);
 }
 
-async function readJson(req) {
+async function readJson(req, limit = 5_000_000) {
   let data = '';
   for await (const chunk of req) {
     data += chunk;
-    if (data.length > 5_000_000) throw new Error('Body too large');
+    if (data.length > limit) throw new Error('Body too large');
   }
   return data ? JSON.parse(data) : {};
+}
+
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const MAX_IMAGES = 10;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // the API's per-image limit
+
+function validImages(list) {
+  if (!Array.isArray(list) || list.length > MAX_IMAGES) return false;
+  return list.every(
+    (i) =>
+      i && IMAGE_TYPES.has(i.mediaType) && typeof i.data === 'string' &&
+      /^[A-Za-z0-9+/]+={0,2}$/.test(i.data) && i.data.length * 0.75 <= MAX_IMAGE_BYTES,
+  );
 }
 
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -430,8 +457,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/send' && req.method === 'POST') {
-      const { sessionId, dir, text, mode = 'default', model, effort } = await readJson(req);
-      if (!text || typeof text !== 'string') return send(res, 400, { error: 'Empty message' });
+      const { sessionId, dir, text = '', images = [], mode = 'default', model, effort } = await readJson(req, 80_000_000);
+      if (typeof text !== 'string') return send(res, 400, { error: 'Bad message' });
+      if (!validImages(images)) {
+        return send(res, 400, { error: `Images must be PNG, JPEG, GIF or WebP, at most ${MAX_IMAGES}, each under 5 MB.` });
+      }
+      if (!text.trim() && !images.length) return send(res, 400, { error: 'Empty message' });
       if (!MODES.has(mode)) return send(res, 400, { error: 'Bad mode' });
       if (effort && !EFFORTS.has(effort)) return send(res, 400, { error: 'Bad effort' });
       if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
@@ -447,7 +478,7 @@ const server = http.createServer(async (req, res) => {
         live.set(key, state);
       }
       state.dir = dir;
-      runTurn(state, text, mode, model, effort);
+      runTurn(state, text, images, mode, model, effort);
       return send(res, 200, { key: state.key });
     }
 

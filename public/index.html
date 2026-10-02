@@ -45,6 +45,7 @@
       <div id="pending" class="pending"></div>
 
       <form id="composer" class="composer">
+        <div id="attachments" class="attachments hidden"></div>
         <textarea id="input" rows="1" placeholder="Message Claude…  (Enter to send, Shift+Enter for newline)"></textarea>
         <div class="composer-row">
           <select id="mode" title="Permission mode">
@@ -69,6 +70,8 @@
             <option value="xhigh">Extra-high effort</option>
             <option value="max">Max effort</option>
           </select>
+          <button type="button" id="attach" title="Attach images (or paste / drop them)">📎</button>
+          <input type="file" id="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
           <span class="spacer"></span>
           <button type="button" id="stop" class="danger hidden">Stop</button>
           <button type="submit" id="send" class="primary">Send</button>

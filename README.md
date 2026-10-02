@@ -53,6 +53,13 @@ it. Everything is saved on the host in `~/.claude-web/tags.json`, so every
 device sees the same tags and quick tags. They are not written into the Claude
 Code transcripts.
 
+## Images
+
+Click the 📎 button, paste an image into the message box, or drag files onto
+it to attach up to 10 PNG, JPEG, GIF or WebP images. Larger images are
+downscaled in the browser before upload. Attached images show as thumbnails in
+the conversation and can be sent with or without text.
+
 ## How turns work
 
 - One conversation runs one turn at a time. While Claude is working, sending

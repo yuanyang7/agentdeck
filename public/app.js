@@ -390,6 +390,28 @@ function stripMeta(text) {
   return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
 }
 
+// A user bubble: optional image thumbnails (click to open full size) and text.
+function userBubble(text, images) {
+  const d = el('div', 'msg-user');
+  if (images.length) {
+    const row = el('div', 'msg-images');
+    for (const src of images) {
+      const img = el('img');
+      img.src = src;
+      img.addEventListener('click', () => window.open(src, '_blank'));
+      row.appendChild(img);
+    }
+    d.appendChild(row);
+  }
+  if (text) d.appendChild(el('div', 'msg-text', text));
+  return d;
+}
+
+function imageSrc(b) {
+  const s = b.source || {};
+  return s.type === 'base64' ? `data:${s.media_type};base64,${s.data}` : s.type === 'url' ? s.url : null;
+}
+
 function renderMessage(m) {
   if (m.uuid) {
     if (ui.seen.has(m.uuid)) return;
@@ -400,6 +422,9 @@ function renderMessage(m) {
   const content = typeof msg.content === 'string' ? [{ type: 'text', text: msg.content }] : msg.content || [];
 
   if (m.type === 'user') {
+    // Images and text from one prompt share a bubble.
+    const images = content.filter((b) => b.type === 'image').map(imageSrc).filter(Boolean);
+    let imagesShown = false;
     for (const b of content) {
       if (b.type === 'tool_result') {
         attachToolResult(b);
@@ -409,11 +434,11 @@ function renderMessage(m) {
           if (t.startsWith('[Request interrupted')) append(el('div', 'result-line', 'Interrupted'));
           continue;
         }
-        append(el('div', 'msg-user', t));
-      } else if (b.type === 'image') {
-        append(el('div', 'msg-user muted', '[image]'));
+        append(userBubble(t, imagesShown ? [] : images));
+        imagesShown = true;
       }
     }
+    if (!imagesShown && images.length) append(userBubble('', images));
     return;
   }
 
@@ -516,7 +541,7 @@ function handleTurnEvent(ev, replay) {
       const users = $('messages').querySelectorAll('.msg-user');
       const last = users[users.length - 1];
       if (replay && last && last.textContent === ev.text) break;
-      append(el('div', 'msg-user', ev.text));
+      append(userBubble(ev.text, (ev.images || []).map(dataUrl)));
       break;
     }
     case 'delta':
@@ -718,30 +743,137 @@ input.addEventListener('keydown', (e) => {
   }
 });
 
+// ---------- image attachments ----------
+
+const MAX_EDGE = 1568; // larger images are downscaled; the API resizes them anyway
+const MAX_BYTES = 3 * 1024 * 1024;
+const MAX_ATTACH = 10;
+const attachments = []; // { mediaType, data (base64), url }
+
+const dataUrl = (img) => `data:${img.mediaType};base64,${img.data}`;
+
+function renderAttachments() {
+  const box = $('attachments');
+  box.innerHTML = '';
+  box.classList.toggle('hidden', !attachments.length);
+  attachments.forEach((a, i) => {
+    const wrap = el('div', 'attachment');
+    const img = el('img');
+    img.src = dataUrl(a);
+    const rm = el('button', '', '×');
+    rm.type = 'button';
+    rm.title = 'Remove';
+    rm.addEventListener('click', () => {
+      attachments.splice(i, 1);
+      renderAttachments();
+    });
+    wrap.append(img, rm);
+    box.appendChild(wrap);
+  });
+}
+
+function readAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+// Keeps small supported images as they are; otherwise redraws through a canvas.
+async function prepareImage(file) {
+  const supported = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type);
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (supported && file.size <= MAX_BYTES && (!bitmap || Math.max(bitmap.width, bitmap.height) <= MAX_EDGE)) {
+    bitmap?.close();
+    return { mediaType: file.type, data: (await readAsDataUrl(file)).split(',')[1] };
+  }
+  if (!bitmap) throw new Error(`Can't read ${file.name || 'that file'} as an image`);
+  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; // JPEG has no transparency
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const out = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+  return { mediaType: 'image/jpeg', data: (await readAsDataUrl(out)).split(',')[1] };
+}
+
+async function addFiles(files) {
+  const images = [...files].filter((f) => f.type.startsWith('image/'));
+  for (const f of images) {
+    if (attachments.length >= MAX_ATTACH) {
+      alert(`At most ${MAX_ATTACH} images per message.`);
+      break;
+    }
+    try {
+      attachments.push(await prepareImage(f));
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+  renderAttachments();
+}
+
+$('attach').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', async () => {
+  await addFiles($('file').files);
+  $('file').value = '';
+});
+input.addEventListener('paste', (e) => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (files.some((f) => f.type.startsWith('image/'))) {
+    e.preventDefault();
+    addFiles(files);
+  }
+});
+$('composer').addEventListener('dragover', (e) => {
+  if ([...(e.dataTransfer?.types || [])].includes('Files')) {
+    e.preventDefault();
+    $('composer').classList.add('drag');
+  }
+});
+$('composer').addEventListener('dragleave', () => $('composer').classList.remove('drag'));
+$('composer').addEventListener('drop', (e) => {
+  $('composer').classList.remove('drag');
+  if (e.dataTransfer?.files?.length) {
+    e.preventDefault();
+    addFiles(e.dataTransfer.files);
+  }
+});
+
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = input.value.trim();
-  if (!text || ui.running || !ui.dir) return;
+  if ((!text && !attachments.length) || ui.running || !ui.dir) return;
   $('send').disabled = true;
+  const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
   try {
     const { key } = await api('/api/send', {
       sessionId: ui.sessionId,
       dir: ui.dir,
       text,
+      images,
       mode: $('mode').value,
       model: $('model').value || undefined,
       effort: $('effort').value || undefined,
     });
     if (!ui.key) {
       ui.key = key;
-      $('title').textContent = text.split('\n')[0].slice(0, 80);
+      $('title').textContent = text.split('\n')[0].slice(0, 80) || '(image)';
       $('messages').innerHTML = '';
       // The server already broadcast user_text before we knew our key; show it.
-      append(el('div', 'msg-user', text));
+      append(userBubble(text, images.map(dataUrl)));
       loadSessions();
     }
     setRunning(true);
     input.value = '';
+    attachments.length = 0;
+    renderAttachments();
     autosize();
   } catch (err) {
     alert(err.message);
