@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Claude Web</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <form id="login-form">
+      <h1>Claude Web</h1>
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password" autofocus>
+      <button type="submit">Sign in</button>
+      <p id="login-error" class="error"></p>
+    </form>
+  </div>
+
+  <div id="app" class="app hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <select id="project" title="Project folder"></select>
+        <button id="new-chat" class="primary">+ New conversation</button>
+      </div>
+      <ul id="sessions" class="sessions"></ul>
+      <div class="sidebar-foot" id="host"></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button id="toggle-sidebar" class="icon" title="Conversations">☰</button>
+        <div class="title">
+          <div id="title">New conversation</div>
+          <div id="subtitle" class="muted"></div>
+        </div>
+        <span id="status" class="status"></span>
+      </header>
+
+      <div id="messages" class="messages"></div>
+
+      <div id="pending" class="pending"></div>
+
+      <form id="composer" class="composer">
+        <textarea id="input" rows="1" placeholder="Message Claude…  (Enter to send, Shift+Enter for newline)"></textarea>
+        <div class="composer-row">
+          <select id="mode" title="Permission mode">
+            <option value="default">Ask before actions</option>
+            <option value="acceptEdits">Auto-accept edits</option>
+            <option value="plan">Plan mode</option>
+            <option value="auto">Auto</option>
+            <option value="bypassPermissions">Bypass permissions</option>
+          </select>
+          <span class="spacer"></span>
+          <button type="button" id="stop" class="danger hidden">Stop</button>
+          <button type="submit" id="send" class="primary">Send</button>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <script src="/vendor/marked.js"></script>
+  <script src="/vendor/purify.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
