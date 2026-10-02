@@ -23,7 +23,8 @@ By default it listens on this machine's Tailscale IP (from `tailscale ip -4`),
 port 7878, so it can only be reached from devices on your tailnet. On startup
 it prints the address to open from other devices. Prefer the MagicDNS name
 (`http://<machine-name>:7878`): it stays the same, and some browsers refuse or
-try HTTPS on a bare `100.x` IP. Always type the `http://` prefix.
+try HTTPS on a bare `100.x` IP. Always type the `http://` prefix. It
+also answers on `http://localhost:7878` on the host itself.
 
 Requires Node 18+ and Claude Code being logged in on the host (the server uses
 the same login).

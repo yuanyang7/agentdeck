@@ -410,3 +410,10 @@ server.listen(PORT, HOST, () => {
   console.log(PASSWORD ? 'Password protection: on' : 'Password protection: off (set PASSWORD to enable)');
   console.log(`Project roots: ${PROJECT_ROOTS.join(', ')}`);
 });
+
+// Also answer on localhost so it can be opened on the host itself.
+if (HOST !== '127.0.0.1' && HOST !== 'localhost' && HOST !== '0.0.0.0' && HOST !== '::') {
+  const local = http.createServer((req, res) => server.emit('request', req, res));
+  local.on('error', (err) => console.warn(`Not listening on localhost:${PORT}: ${err.message}`));
+  local.listen(PORT, '127.0.0.1', () => console.log(`Also on http://localhost:${PORT}`));
+}
