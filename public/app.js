@@ -258,6 +258,14 @@ function renderSessions() {
       const d = document.createElement('span');
       d.className = 'dot';
       t.appendChild(d);
+    } else if (s.unread && s.key !== ui.key) {
+      // A turn finished here that this browser hasn't seen; opening the chat
+      // counts as reading it. The open chat itself is never "unread".
+      const d = document.createElement('span');
+      d.className = 'dot unread';
+      d.title = 'Finished — not read yet';
+      t.appendChild(d);
+      t.classList.add('unread');
     }
     t.appendChild(document.createTextNode(s.title || 'Untitled'));
     const meta = el('div', 's-meta');
@@ -336,6 +344,10 @@ async function openConversation(agent, id) {
 
   const data = await api(`/api/sessions/${agent}/${encodeURIComponent(id)}?dir=${encodeURIComponent(ui.dir)}`);
   if (ui.key !== key) return;
+  if (s?.unread) {
+    s.unread = false; // the GET above marked the chat read on the server
+    renderSessions();
+  }
   for (const item of data.items) upsert(item);
   if (data.live) {
     for (const item of data.live.items) upsert(item);
@@ -478,12 +490,26 @@ function handleTurnEvent(ev) {
   else if (ev.type === 'status') applyStatus(ev);
 }
 
+// Watching the open conversation's turn finish counts as reading it, so the
+// chat doesn't show up as unread on this or any other device.
+function markRead() {
+  if (!ui.key) return;
+  const s = ui.sessions.find((x) => x.key === ui.key);
+  if (s?.unread) {
+    s.unread = false;
+    renderSessions();
+  }
+  api('/api/read', { key: ui.key, agent: ui.agent, sessionId: ui.sessionId, dir: ui.dir }).catch(() => {});
+}
+
 function applyStatus(st) {
+  const wasRunning = ui.running;
   ui.pending = st.pending || [];
   setRunning(st.running);
   ui.mode = st.mode || null;
   if (st.mode && [...$('mode').options].some((o) => o.value === st.mode)) $('mode').value = st.mode;
   renderPending();
+  if (wasRunning && !st.running) markRead();
 }
 
 function setRunning(running) {

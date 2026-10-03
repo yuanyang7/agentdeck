@@ -99,6 +99,8 @@ select {
 .sessions .s-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
 .sessions .s-meta { font-size: 12px; color: var(--muted); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 6px; animation: pulse 1.2s infinite; }
+.dot.unread { background: var(--accent); animation: none; }
+.sessions .s-title.unread { font-weight: 600; }
 @keyframes pulse { 50% { opacity: 0.3; } }
 
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }

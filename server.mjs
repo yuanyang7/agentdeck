@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { Hub, BusyError } from './lib/hub.mjs';
 import { backends, availableBackends } from './lib/agents/index.mjs';
 import { tagsOf, setTags, quickTags, setQuickTags } from './lib/tags.mjs';
+import { isUnread, markRead } from './lib/reads.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 7878);
@@ -113,7 +114,7 @@ async function listConversations(dir) {
     }
     for (const s of sessions) {
       const key = `${b.id}:${s.id}`;
-      out.push({ ...s, agent: b.id, key, running: !!hub.get(key)?.running, tags: tagsOf(b.id, s.id) });
+      out.push({ ...s, agent: b.id, key, running: !!hub.get(key)?.running, unread: isUnread(b.id, s.id), tags: tagsOf(b.id, s.id) });
     }
   }
   out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
@@ -253,6 +254,13 @@ const server = http.createServer(async (req, res) => {
       const items = conv && !conv.sessionId ? [] : await backend.history(conv?.sessionId || id, dir);
       // While a turn is running the history may lag; the browser merges the
       // live items on top by id.
+      // Opening a chat counts as reading it. `id` may be a temp key of a
+      // conversation that is still starting, which has no stored state yet.
+      const sessionId = conv?.sessionId || (id.startsWith('new-') ? null : id);
+      if (sessionId) {
+        markRead(agent, sessionId);
+        hub.broadcast({ type: 'sessions_changed', dir });
+      }
       return send(res, 200, { items, live: conv ? hub.snapshot(conv) : null });
     }
 
@@ -304,6 +312,22 @@ const server = http.createServer(async (req, res) => {
       const opts = conv && (await backends.get(conv.agent).options());
       if (conv && !opts.modes.some((x) => x.value === mode)) return send(res, 400, { error: 'Bad mode' });
       await hub.setMode(key, mode);
+      return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/read' && req.method === 'POST') {
+      // Marks a chat read: sent when a browser watches its turn finish. The
+      // key is preferred because it also resolves temp keys of conversations
+      // that just got their session id; otherwise fall back to the session id.
+      const { key, agent, sessionId, dir } = await readJson(req);
+      const conv = key ? hub.get(key) : null;
+      const a = conv?.agent || agent;
+      const sid = conv?.sessionId || sessionId;
+      if (!a || !backends.has(a) || typeof sid !== 'string' || !SESSION_ID.test(sid)) {
+        return send(res, 400, { error: 'Bad session' });
+      }
+      markRead(a, sid);
+      hub.broadcast({ type: 'sessions_changed', dir });
       return send(res, 200, { ok: true });
     }
 
