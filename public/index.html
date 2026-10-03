@@ -46,14 +46,16 @@
           <div id="subtitle" class="muted"></div>
         </div>
         <span id="status" class="status"></span>
+        <button id="approval-jump" class="approval-jump hidden" type="button" aria-controls="pending"><span class="approval-text">Review request</span><span class="approval-short">Review</span><span id="approval-count" class="approval-count">1</span></button>
         <button id="toggle-usage" class="usage-button" type="button" title="Usage">Usage <span aria-hidden="true">↗</span></button>
       </header>
+      <div id="announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
       <div id="usage" class="usage hidden"></div>
 
       <div id="messages" class="messages"></div>
 
-      <div id="pending" class="pending"></div>
+      <div id="pending" class="pending" role="region" aria-label="Pending approvals"></div>
 
       <form id="composer" class="composer">
         <div id="attachments" class="attachments hidden"></div>

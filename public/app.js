@@ -18,6 +18,7 @@ const ui = {
   items: new Map(), // id -> transcript item (see lib/items.mjs)
   els: new Map(), // id -> rendered element
 };
+let pendingAnnouncementTimer = 0;
 
 // crypto.randomUUID needs a secure context, which plain http on the tailnet isn't.
 const randomId = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -345,6 +346,8 @@ function resetView() {
   ui.els.clear();
   ui.mode = null;
   ui.pending = [];
+  clearTimeout(pendingAnnouncementTimer);
+  $('announcement').textContent = '';
   renderPending();
 }
 
@@ -551,12 +554,28 @@ function markRead() {
 
 function applyStatus(st) {
   const wasRunning = ui.running;
-  ui.pending = st.pending || [];
+  const previous = new Set(ui.pending.map((p) => p.id));
+  const next = st.pending || [];
+  const added = next.filter((p) => !previous.has(p.id)).length;
+  const removed = ui.pending.filter((p) => !next.some((n) => n.id === p.id)).length;
+  if (added || removed) {
+    const changes = [];
+    if (added) changes.push(`${added} new approval ${added === 1 ? 'request' : 'requests'}.`);
+    if (removed) changes.push(`${removed} approval ${removed === 1 ? 'request' : 'requests'} resolved.`);
+    announcePending(`${changes.join(' ')} ${next.length ? `${next.length} pending. Use Review to open.` : 'No requests pending.'}`);
+  }
+  ui.pending = next;
   setRunning(st.running);
   ui.mode = st.mode || null;
   if (st.mode && [...$('mode').options].some((o) => o.value === st.mode)) $('mode').value = st.mode;
   renderPending();
   if (wasRunning && !st.running) markRead();
+}
+
+function announcePending(message) {
+  clearTimeout(pendingAnnouncementTimer);
+  $('announcement').textContent = '';
+  pendingAnnouncementTimer = setTimeout(() => { $('announcement').textContent = message; }, 50);
 }
 
 function setRunning(running) {
@@ -566,9 +585,9 @@ function setRunning(running) {
   $('status').classList.remove('status-error');
   $('status').removeAttribute('role');
   $('status').innerHTML = '';
-  if (running) {
+  if (running && !ui.pending.length) {
     const d = el('span', 'dot');
-    $('status').append(d, document.createTextNode(ui.pending.length ? 'Needs approval' : 'Working…'));
+    $('status').append(d, document.createTextNode('Working…'));
   }
 }
 
@@ -621,44 +640,80 @@ function connectEvents() {
 
 function renderPending() {
   const box = $('pending');
-  box.innerHTML = '';
   if (ui.running) setRunning(true);
-  for (const p of ui.pending) {
-    const card = el('div', 'perm');
-    if (p.kind === 'question') {
-      renderQuestion(card, p);
-    } else {
-      card.appendChild(el('h4', '', p.title));
-      if (p.reason) card.appendChild(el('div', 'muted', p.reason));
-      const pre = el('pre');
-      if (p.markdown) {
-        pre.className = 'msg-assistant';
-        pre.innerHTML = md(p.detail);
-      } else {
-        pre.textContent = p.detail || '';
-      }
-      card.appendChild(pre);
-      const row = el('div', 'row');
-      const allow = el('button', 'primary', 'Allow');
-      allow.onclick = () => answer(p, { allow: true });
-      row.appendChild(allow);
-      if (p.canAlways) {
-        const always = el('button', '', 'Allow & don’t ask again');
-        always.onclick = () => answer(p, { allow: true, always: true });
-        row.appendChild(always);
-      }
-      const deny = el('button', 'danger', 'Deny');
-      deny.onclick = () => {
-        const why = prompt(`Tell ${agentLabel(ui.agent)} what to do instead (optional):`) ?? null;
-        if (why === null) return;
-        answer(p, { allow: false, message: why || undefined });
-      };
-      row.appendChild(deny);
-      card.appendChild(row);
-    }
-    box.appendChild(card);
-  }
+  const jump = $('approval-jump');
+  jump.classList.toggle('hidden', !ui.pending.length);
+  if (ui.pending.length) jump.setAttribute('aria-label', `Review ${ui.pending.length} pending approval ${ui.pending.length === 1 ? 'request' : 'requests'}`);
+  $('approval-count').textContent = ui.pending.length;
+  $('approval-count').classList.toggle('hidden', ui.pending.length === 1);
+  jump.querySelector('.approval-text').textContent = ui.pending.length === 1 ? 'Review request' : 'Review requests';
+  const existing = new Map([...box.children].map((card) => [card.pendingId, card]));
+  const cards = ui.pending.map((p) => {
+    const snapshot = JSON.stringify(p);
+    const card = existing.get(p.id);
+    if (card?.pendingSnapshot === snapshot) return card;
+    const replacement = makePendingCard(p);
+    replacement.pendingId = p.id;
+    replacement.pendingSnapshot = snapshot;
+    return replacement;
+  });
+  const focusedCard = document.activeElement.closest?.('.perm');
+  const restoreFocus = focusedCard && !cards.includes(focusedCard);
+  for (const card of [...box.children]) if (!cards.includes(card)) card.remove();
+  cards.forEach((card, i) => {
+    if (box.children[i] !== card) box.insertBefore(card, box.children[i] || null);
+  });
+  if (restoreFocus) (cards[0] || $('input')).focus();
 }
+
+function makePendingCard(p) {
+  const card = el('div', 'perm');
+  card.tabIndex = -1;
+  card.setAttribute('role', 'group');
+  card.setAttribute('aria-label', p.title || 'Approval request');
+  card.appendChild(el('div', 'perm-kicker', 'ACTION REQUIRED'));
+  if (p.kind === 'question') {
+    renderQuestion(card, p);
+  } else {
+    card.appendChild(el('h4', '', p.title));
+    if (p.reason) card.appendChild(el('div', 'muted', p.reason));
+    const pre = el('pre');
+    if (p.markdown) {
+      pre.className = 'msg-assistant';
+      pre.innerHTML = md(p.detail);
+    } else {
+      pre.textContent = p.detail || '';
+    }
+    card.appendChild(pre);
+    const row = el('div', 'row');
+    const allow = el('button', 'primary', 'Allow');
+    allow.onclick = () => answer(p, { allow: true });
+    row.appendChild(allow);
+    if (p.canAlways) {
+      const always = el('button', '', 'Allow & don’t ask again');
+      always.onclick = () => answer(p, { allow: true, always: true });
+      row.appendChild(always);
+    }
+    const deny = el('button', 'danger', 'Deny');
+    deny.onclick = () => {
+      const why = prompt(`Tell ${agentLabel(ui.agent)} what to do instead (optional):`) ?? null;
+      if (why === null) return;
+      answer(p, { allow: false, message: why || undefined });
+    };
+    row.appendChild(deny);
+    card.appendChild(row);
+  }
+  return card;
+}
+
+$('approval-jump').addEventListener('click', () => {
+  const box = $('pending');
+  const card = box.querySelector('.perm');
+  if (!card) return;
+  box.scrollTop = 0;
+  card.focus({ preventScroll: true });
+  card.scrollIntoView({ block: 'nearest' });
+});
 
 // Answers go back as one list of chosen labels (or typed text) per question.
 function renderQuestion(card, p) {
