@@ -251,6 +251,8 @@ function renderSessions() {
   for (const s of ui.sessions) {
     if (ui.tagFilter && !(s.tags || []).includes(ui.tagFilter)) continue;
     const li = document.createElement('li');
+    li.tabIndex = 0;
+    li.setAttribute('role', 'button');
     if (s.key === ui.key) li.classList.add('active');
     const t = document.createElement('div');
     t.className = 's-title';
@@ -288,8 +290,15 @@ function renderSessions() {
       li.appendChild(b);
     }
     li.onclick = () => {
+      const keyboardFocus = document.activeElement === li;
+      setSidebarOpen(false);
       openConversation(s.agent, s.id || s.key);
-      $('sidebar').classList.remove('open');
+      if (keyboardFocus && !mobileSidebar.matches) $('sessions').querySelector('li.active')?.focus();
+    };
+    li.onkeydown = (e) => {
+      if (e.target !== li || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      li.click();
     };
     ul.appendChild(li);
   }
@@ -297,11 +306,35 @@ function renderSessions() {
 
 $('new-chat').addEventListener('click', () => {
   newConversation();
-  $('sidebar').classList.remove('open');
+  setSidebarOpen(false);
   $('input').focus();
 });
 
-$('toggle-sidebar').addEventListener('click', () => $('sidebar').classList.toggle('open'));
+const mobileSidebar = matchMedia('(max-width: 760px)');
+
+function setSidebarOpen(open) {
+  open = open && mobileSidebar.matches;
+  const hadFocus = $('sidebar').contains(document.activeElement);
+  $('sidebar').classList.toggle('open', open);
+  $('sidebar-backdrop').classList.toggle('open', open);
+  $('toggle-sidebar').setAttribute('aria-expanded', String(open));
+  $('toggle-sidebar').setAttribute('aria-label', open ? 'Close conversations' : 'Open conversations');
+  $('sidebar').inert = mobileSidebar.matches && !open;
+  $('sidebar').setAttribute('aria-hidden', String(mobileSidebar.matches && !open));
+  document.querySelector('.main').inert = open;
+  if (open) $('close-sidebar').focus();
+  else if (hadFocus && mobileSidebar.matches) $('toggle-sidebar').focus();
+}
+
+mobileSidebar.addEventListener('change', () => setSidebarOpen(false));
+setSidebarOpen(false);
+
+$('toggle-sidebar').addEventListener('click', () => setSidebarOpen(!$('sidebar').classList.contains('open')));
+$('close-sidebar').addEventListener('click', () => setSidebarOpen(false));
+$('sidebar-backdrop').addEventListener('click', () => setSidebarOpen(false));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('sidebar').classList.contains('open')) setSidebarOpen(false);
+});
 
 // ---------- conversation ----------
 
@@ -319,7 +352,16 @@ function newConversation() {
   ui.sessionId = null;
   ui.running = false;
   resetView();
-  $('messages').innerHTML = '<div class="empty">Start a new conversation in this project.</div>';
+  $('messages').innerHTML = '';
+  const empty = el('div', 'empty');
+  empty.appendChild(el('div', 'empty-mark', '✳'));
+  empty.appendChild(el('h2', '', 'What are we building today?'));
+  const intro = el('p');
+  intro.append('Start a conversation in ');
+  intro.appendChild(el('span', 'empty-project', ui.dir?.split('/').pop() || 'this project'));
+  intro.append('.');
+  empty.appendChild(intro);
+  $('messages').appendChild(empty);
   $('title').textContent = 'New conversation';
   $('subtitle').textContent = ui.dir || '';
   selectAgent(localStorage.getItem('cw_agent'));
@@ -516,6 +558,8 @@ function setRunning(running) {
   ui.running = running;
   $('stop').classList.toggle('hidden', !running);
   $('send').disabled = running;
+  $('status').classList.remove('status-error');
+  $('status').removeAttribute('role');
   $('status').innerHTML = '';
   if (running) {
     const d = el('span', 'dot');
@@ -688,15 +732,21 @@ async function selectAgent(agent) {
   ui.agent = agent;
   $('agent').value = agent;
   $('agent').disabled = !!ui.key;
-  $('input').placeholder = `Message ${agentLabel(agent)}…  (Enter to send, Shift+Enter for newline)`;
+  $('input').placeholder = `Message ${agentLabel(agent)}…`;
   let o;
   try {
     o = await loadOptions(agent);
   } catch (err) {
+    if (ui.agent !== agent) return;
+    $('status').classList.add('status-error');
+    $('status').setAttribute('role', 'alert');
     $('status').textContent = `${agentLabel(agent)} is unavailable: ${err.message}`;
     return;
   }
   if (ui.agent !== agent) return;
+  $('status').classList.remove('status-error');
+  $('status').removeAttribute('role');
+  if (!ui.running) $('status').textContent = '';
   fillSelect($('mode'), o.modes.map((m) => [m.value, m.label]), ui.mode || o.defaultMode);
   fillSelect(
     $('model'),

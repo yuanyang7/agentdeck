@@ -3,13 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Claude Web</title>
+  <meta name="theme-color" content="#f7f8fb">
+  <title>Agentdeck</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <div id="login" class="login hidden">
     <form id="login-form">
-      <h1>Claude Web</h1>
+      <div class="login-mark" aria-hidden="true">✳</div>
+      <h1>Welcome to Agentdeck</h1>
+      <p class="muted">Your coding conversations, in one place.</p>
       <input id="password" type="password" placeholder="Password" autocomplete="current-password" autofocus>
       <button type="submit">Sign in</button>
       <p id="login-error" class="error"></p>
@@ -17,11 +20,18 @@
   </div>
 
   <div id="app" class="app hidden">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-head">
+        <div class="brand-row">
+          <div class="brand"><span class="brand-mark" aria-hidden="true">✳</span><span>agentdeck</span></div>
+          <button id="close-sidebar" class="icon close-sidebar" type="button" aria-label="Close conversations">×</button>
+        </div>
+        <label class="sidebar-label" for="project">WORKSPACE</label>
         <select id="project" title="Project folder"></select>
-        <button id="new-chat" class="primary">+ New conversation</button>
+        <button id="new-chat" class="primary new-chat"><span aria-hidden="true">＋</span> New conversation</button>
       </div>
+      <div class="sidebar-section-title">CONVERSATIONS</div>
       <div id="tag-filter" class="tag-filter hidden"></div>
       <ul id="sessions" class="sessions"></ul>
       <div class="sidebar-foot" id="host"></div>
@@ -29,13 +39,14 @@
 
     <main class="main">
       <header class="topbar">
-        <button id="toggle-sidebar" class="icon" title="Conversations">☰</button>
+        <button id="toggle-sidebar" class="icon menu-button" type="button" aria-label="Open conversations" aria-expanded="false" title="Conversations"><span></span><span></span><span></span></button>
         <div class="title">
+          <div class="topbar-eyebrow">WORKSPACE CHAT</div>
           <div id="title">New conversation</div>
           <div id="subtitle" class="muted"></div>
         </div>
         <span id="status" class="status"></span>
-        <button id="toggle-usage" class="icon" title="Usage">Usage</button>
+        <button id="toggle-usage" class="usage-button" type="button" title="Usage">Usage <span aria-hidden="true">↗</span></button>
       </header>
 
       <div id="usage" class="usage hidden"></div>
@@ -46,17 +57,21 @@
 
       <form id="composer" class="composer">
         <div id="attachments" class="attachments hidden"></div>
-        <textarea id="input" rows="1" placeholder="Message…  (Enter to send, Shift+Enter for newline)"></textarea>
+        <label class="sr-only" for="input">Message</label>
+        <textarea id="input" rows="1" placeholder="Ask anything about your project..."></textarea>
         <div class="composer-row">
-          <select id="agent" title="Agent (for a new conversation)" class="hidden"></select>
-          <select id="mode" title="Mode"></select>
-          <select id="model" title="Model"></select>
-          <select id="effort" title="Effort"></select>
-          <button type="button" id="attach" title="Attach images (or paste / drop them)">📎</button>
-          <input type="file" id="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
-          <span class="spacer"></span>
-          <button type="button" id="stop" class="danger hidden">Stop</button>
-          <button type="submit" id="send" class="primary">Send</button>
+          <div class="composer-options">
+            <select id="agent" title="Agent (for a new conversation)" aria-label="Agent" class="hidden"></select>
+            <select id="mode" title="Mode" aria-label="Mode"></select>
+            <select id="model" title="Model" aria-label="Model"></select>
+            <select id="effort" title="Effort" aria-label="Effort"></select>
+          </div>
+          <div class="composer-actions">
+            <button type="button" id="attach" title="Attach images (or paste / drop them)" aria-label="Attach images">＋</button>
+            <input type="file" id="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+            <button type="button" id="stop" class="danger hidden">Stop</button>
+            <button type="submit" id="send" class="primary">Send <span aria-hidden="true">↗</span></button>
+          </div>
         </div>
       </form>
     </main>
