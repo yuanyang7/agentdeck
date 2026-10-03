@@ -15,11 +15,11 @@
 - Verification: `node --check public/app.js`, `git diff --check`, local HTTP smoke test for the page and assets, and adversarial diff review.
 - Remaining limitations: The header control reflects pending requests in the open chat; it does not aggregate requests from other conversations.
 
-### 2026-10-02 — Per-chat model and effort
+### 2026-10-03 — Per-chat model, effort and permission mode
 
-- Final behavior: Each chat's model and effort are stored on the server (`~/.agentdeck/models.json`), recorded whenever a turn starts and whenever the pickers change in an open chat. Opening a chat on any device shows its stored model; other devices viewing the chat follow changes live. Every switch adds a notice line to the transcript ("Switched to …" locally, "Now using … (changed on another device)" remotely). The per-browser choice now only seeds new chats.
-- Verification: `node --check` on changed files; endpoint, broadcast and storage smoke-tested against a temporary HOME.
-- Remaining limitations: Chats last used before this change have no record and show the agent's default until their next message. Switch notices are live only and are not kept in the transcript history.
+- Final behavior: Each chat's model, effort and permission mode are stored on the server (`~/.agentdeck/chat-settings.json`, migrated from the earlier `models.json`), recorded whenever a turn starts, its mode changes, or the pickers change in an open chat. Opening a chat on any device shows its stored settings; other devices viewing the chat follow changes live. Every switch adds a notice line to the transcript ("Switched to …" locally, "Now using … (changed on another device)" remotely). Chats without a record get what the agent says they last used, recorded once: Claude from the transcript file (model of the last reply, mode of the last prompt), Codex from the last `turn_context` in the rollout file (model, effort, approval and sandbox policy), opencode from the session (model, variant, agent and permission rules). The per-browser choice (now including the mode) only seeds new chats.
+- Verification: `node --check` on changed files; inference checked on real Claude, Codex and opencode chats; endpoint, validation, broadcast and migration smoke-tested against a temporary HOME; headless Chrome check that an existing chat opens with its own mode and model, and that a mode switch shows a notice and survives a reload.
+- Remaining limitations: Claude transcripts don't record effort, so inferred Claude chats show the default effort until changed. Codex inference depends on its rollout file format and falls back to defaults if that changes. A record is not refreshed if the chat is later continued outside agentdeck with other settings. Switch notices are live only and are not kept in the transcript history.
 
 ### 2026-10-02 — Responsive interface redesign
 

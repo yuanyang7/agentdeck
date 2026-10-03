@@ -16,7 +16,7 @@ import { Hub, BusyError } from './lib/hub.mjs';
 import { backends, availableBackends } from './lib/agents/index.mjs';
 import { tagsOf, setTags, quickTags, setQuickTags } from './lib/tags.mjs';
 import { isUnread, markRead } from './lib/reads.mjs';
-import { modelOf } from './lib/models.mjs';
+import { settingsOf, setSettings } from './lib/chat-settings.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 7878);
@@ -188,6 +188,21 @@ function validAnswers(a) {
   return a === undefined || (Array.isArray(a) && a.every((x) => Array.isArray(x) && x.every((s) => typeof s === 'string')));
 }
 
+// A chat's { model, effort, mode }. Chats this app hasn't recorded (from
+// before it kept them, or used elsewhere) get what the agent says they last
+// used, recorded so this happens once per chat. Records from before modes
+// were kept get only the mode filled in.
+async function chatSettings(backend, sessionId, dir) {
+  const known = settingsOf(backend.id, sessionId);
+  if (known?.mode || !backend.lastSettings) return known;
+  const last = await backend.lastSettings(sessionId, dir).catch(() => null);
+  const { modes } = await backend.options();
+  const mode = modes.some((m) => m.value === last?.mode) ? last.mode : null;
+  if (!mode && (known || !last)) return known;
+  setSettings(backend.id, sessionId, known ? { ...known, mode } : { ...last, mode });
+  return settingsOf(backend.id, sessionId);
+}
+
 async function backendFor(agent) {
   const b = backends.get(agent);
   if (!b || !(await availableBackends()).includes(b)) return null;
@@ -296,7 +311,7 @@ const server = http.createServer(async (req, res) => {
         markRead(agent, sessionId);
         hub.broadcast({ type: 'sessions_changed', dir });
       }
-      return send(res, 200, { items, live: conv ? hub.snapshot(conv) : null, model: sessionId ? modelOf(agent, sessionId) : null });
+      return send(res, 200, { items, live: conv ? hub.snapshot(conv) : null, settings: sessionId ? await chatSettings(backend, sessionId, dir) : null });
     }
 
     if (p === '/api/send' && req.method === 'POST') {
@@ -350,13 +365,15 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
 
-    if (p === '/api/model' && req.method === 'POST') {
+    if (p === '/api/settings' && req.method === 'POST') {
       // The pickers changed in an open chat: remember it for every device.
-      const { agent, sessionId, model, effort } = await readJson(req);
-      if (!backends.has(agent)) return send(res, 400, { error: 'Unknown agent' });
+      const { agent, sessionId, model, effort, mode } = await readJson(req);
+      const backend = await backendFor(agent);
+      if (!backend) return send(res, 400, { error: 'Unknown agent' });
       if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) return send(res, 400, { error: 'Bad session' });
       if (!validName(model) || !validName(effort)) return send(res, 400, { error: 'Bad model or effort' });
-      hub.modelChanged(agent, sessionId, { model, effort });
+      if (mode && !(await backend.options()).modes.some((x) => x.value === mode)) return send(res, 400, { error: 'Bad mode' });
+      hub.settingsChanged(agent, sessionId, { model, effort, mode });
       return send(res, 200, { ok: true });
     }
 

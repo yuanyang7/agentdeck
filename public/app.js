@@ -9,7 +9,7 @@ const ui = {
   sessionId: null,
   running: false,
   mode: null, // mode reported by the live conversation, if any
-  model: null, // { model, effort } the open chat uses, as stored on the server
+  settings: null, // { model, effort, mode } the open chat uses, as stored on the server
   pending: [],
   sessions: [],
   tagFilter: null, // tag the chat list is filtered to, or null
@@ -381,7 +381,7 @@ async function openConversation(agent, id) {
   const temp = id.startsWith('new-');
   ui.key = temp ? id : `${agent}:${id}`;
   ui.sessionId = temp ? null : id;
-  ui.model = null;
+  ui.settings = null;
   const key = ui.key;
   resetView();
   selectAgent(agent);
@@ -397,9 +397,9 @@ async function openConversation(agent, id) {
     s.unread = false; // the GET above marked the chat read on the server
     renderSessions();
   }
-  // Chats from before models were stored per chat show the agent's default.
-  ui.model = data.model || { model: null, effort: null };
-  fillModels();
+  // Chats the server knows nothing about show the agent's defaults.
+  ui.settings = data.settings || { model: null, effort: null, mode: null };
+  fillPickers();
   for (const item of data.items) upsert(item);
   if (data.live) {
     for (const item of data.live.items) upsert(item);
@@ -707,10 +707,10 @@ function connectEvents() {
       if (ev.dir === ui.dir) loadSessions();
       return;
     }
-    if (ev.type === 'model_changed') {
-      if (ev.agent === ui.agent && ev.sessionId === ui.sessionId && !samePick(ev.model, ui.model)) {
-        ui.model = ev.model;
-        fillModels().then(() => modelNotice('Now using', 'changed on another device'));
+    if (ev.type === 'settings_changed') {
+      if (ev.agent === ui.agent && ev.sessionId === ui.sessionId && !samePick(ev.settings, ui.settings)) {
+        ui.settings = ev.settings;
+        fillPickers().then(() => settingsNotice('Now using', 'changed on another device'));
       }
       return;
     }
@@ -917,28 +917,32 @@ async function selectAgent(agent) {
   $('status').classList.remove('status-error');
   $('status').removeAttribute('role');
   if (!ui.running) $('status').textContent = '';
-  fillSelect($('mode'), o.modes.map((m) => [m.value, m.label]), ui.mode || o.defaultMode);
-  fillModels();
+  fillPickers();
   $('attach').classList.toggle('hidden', !o.images);
   $('toggle-usage').classList.toggle('hidden', !o.usage);
   if (!o.usage) $('usage').classList.add('hidden');
   else if (!$('usage').classList.contains('hidden')) loadUsage();
 }
 
-// An open chat keeps the model and effort stored for it on the server, so
-// every device continues it the same way. A new chat starts with the ones
+// An open chat keeps the model, effort and mode stored for it on the server,
+// so every device continues it the same way. A new chat starts with the ones
 // last picked for a new chat in this browser.
 function picked() {
-  if (ui.key) return ui.model || { model: null, effort: null };
-  return { model: localStorage.getItem('cw_model:' + ui.agent), effort: localStorage.getItem('cw_effort:' + ui.agent) };
+  if (ui.key) return ui.settings || { model: null, effort: null, mode: null };
+  const get = (k) => localStorage.getItem(`cw_${k}:${ui.agent}`) || null;
+  return { model: get('model'), effort: get('effort'), mode: get('mode') };
 }
 
-const samePick = (a, b) => (a?.model || null) === (b?.model || null) && (a?.effort || null) === (b?.effort || null);
+const PICKS = ['model', 'effort', 'mode'];
+const samePick = (a, b) => PICKS.every((k) => (a?.[k] || null) === (b?.[k] || null));
+const currentPick = () => ({ model: $('model').value || null, effort: $('effort').value || null, mode: $('mode').value || null });
 
-async function fillModels() {
+async function fillPickers() {
   const agent = ui.agent;
   const o = await loadOptions(agent);
   if (ui.agent !== agent) return;
+  // A running turn reports the mode it is actually in.
+  fillSelect($('mode'), o.modes.map((m) => [m.value, m.label]), ui.mode || picked().mode || o.defaultMode);
   fillSelect(
     $('model'),
     [['', o.defaultModel ? `Default (${o.defaultModel})` : 'Default model'], ...o.models.map((m) => [m.value, m.label])],
@@ -967,35 +971,37 @@ $('agent').addEventListener('change', () => {
   selectAgent($('agent').value);
 });
 
-// A change applies from the next message. In an open chat it is stored for
-// the chat, and other devices showing it follow along; otherwise it is
-// remembered in this browser for new chats.
-async function pickChanged(before = ui.model) {
-  const next = { model: $('model').value || null, effort: $('effort').value || null };
+// A model or effort change applies from the next message; a mode change also
+// to a running turn. In an open chat it is stored for the chat, and other
+// devices showing it follow along; otherwise it is remembered in this browser
+// for new chats.
+async function pickChanged(before = ui.settings) {
+  const next = currentPick();
   if (!ui.key) {
-    localStorage.setItem('cw_model:' + ui.agent, next.model || '');
-    localStorage.setItem('cw_effort:' + ui.agent, next.effort || '');
+    for (const k of PICKS) localStorage.setItem(`cw_${k}:${ui.agent}`, next[k] || '');
     return;
   }
   if (samePick(next, before)) return;
-  ui.model = next;
-  modelNotice('Switched to', 'from the next message');
+  ui.settings = next;
+  settingsNotice('Switched to', next.mode === before?.mode ? 'from the next message' : 'mode applies now');
   if (ui.sessionId) {
-    api('/api/model', { agent: ui.agent, sessionId: ui.sessionId, ...next }).catch((err) => alert(err.message));
+    api('/api/settings', { agent: ui.agent, sessionId: ui.sessionId, ...next }).catch((err) => alert(err.message));
   }
 }
 
-// A line in the transcript so a model switch is never silent.
-function modelNotice(prefix, suffix) {
-  let text = $('model').selectedOptions[0]?.textContent || 'Default model';
-  if (!$('effort').classList.contains('hidden')) text += ' · ' + ($('effort').selectedOptions[0]?.textContent || 'Default effort');
-  upsert({ id: 'model-' + randomId(), kind: 'notice', text: `${prefix} ${text} (${suffix})` });
+// A line in the transcript so a switch is never silent.
+function settingsNotice(prefix, suffix) {
+  const label = (id) => $(id).selectedOptions[0]?.textContent || '';
+  const parts = [label('model')];
+  if (!$('effort').classList.contains('hidden')) parts.push(label('effort'));
+  parts.push(label('mode'));
+  upsert({ id: 'settings-' + randomId(), kind: 'notice', text: `${prefix} ${parts.filter(Boolean).join(' · ')} (${suffix})` });
 }
 
 $('model').addEventListener('change', async () => {
-  const before = ui.model;
+  const before = ui.settings;
   // Keeps the effort if the new model offers it; fillEfforts falls back otherwise.
-  if (ui.key) ui.model = { ...ui.model, model: $('model').value || null };
+  if (ui.key) ui.settings = { ...ui.settings, model: $('model').value || null };
   await fillEfforts();
   pickChanged(before);
 });
@@ -1128,7 +1134,7 @@ $('composer').addEventListener('submit', async (e) => {
   if (isNew) {
     // Our own temp key, so events sent before the reply already reach us.
     ui.key = 'new-' + randomId();
-    ui.model = { model: $('model').value || null, effort: $('effort').value || null };
+    ui.settings = currentPick();
     $('agent').disabled = true;
     $('title').textContent = text.split('\n')[0].slice(0, 80) || '(image)';
   }
@@ -1163,7 +1169,9 @@ $('composer').addEventListener('submit', async (e) => {
 $('stop').addEventListener('click', () => api('/api/interrupt', { key: ui.key }).catch(() => {}));
 
 $('mode').addEventListener('change', () => {
+  // The live conversation, if any, switches right away.
   if (ui.key) api('/api/mode', { key: ui.key, mode: $('mode').value }).catch(() => {});
+  pickChanged();
 });
 
 // ---------- usage ----------
