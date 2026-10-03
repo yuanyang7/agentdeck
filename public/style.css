@@ -156,6 +156,13 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .msg-images { display: flex; flex-wrap: wrap; gap: 8px; }
 .msg-images + * { margin-top: 8px; }
 .msg-images img { max-height: 200px; max-width: 100%; border-radius: 8px; cursor: zoom-in; }
+.tool-wrap { display: flex; flex-direction: column; gap: 8px; }
+.tool-wrap .msg-images img { max-height: 320px; border: 1px solid var(--border); background: var(--card); }
+.msg-assistant .msg-images.mentioned { margin: 8px 0 12px; }
+.msg-assistant .msg-images.mentioned img { max-height: 240px; border: 1px solid var(--border); }
+.img-missing { color: var(--muted); font-size: 12px; font-style: italic; }
+.msg-assistant img { max-width: 100%; max-height: 480px; border-radius: 8px; cursor: zoom-in; }
+.msg-assistant a img { cursor: pointer; }
 .agent-badge { display: inline-block; font-size: 10px; padding: 1px 6px; margin-right: 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); }
 
 /* Approvals */

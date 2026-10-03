@@ -94,6 +94,26 @@ it to attach up to 10 PNG, JPEG, GIF or WebP images. Larger images are
 downscaled in the browser before upload. Attached images show as thumbnails in
 the conversation and can be sent with or without text.
 
+Images the agent shares show up in the conversation too:
+
+- Pictures a tool returns, such as Claude reading a PNG, a browser or
+  screenshot tool, Codex's image viewer and image generation, or opencode
+  reading an image, appear under the tool card and stay visible while the card
+  is collapsed.
+- Images in a reply's markdown that point at files on the host (an absolute
+  path, a `file://` URL, or a path relative to the project) are loaded through
+  the server, so they also display on other devices.
+- Image files a reply only mentions by name, such as `web-1-entry.png` or
+  `/tmp/shots/home.png`, get thumbnails under the paragraph or list item that
+  mentions them. A bare file name is matched against the paths the agent's
+  tools used earlier in the conversation; a path with a folder is taken
+  relative to the project. Names that don't lead to an existing image are
+  left as plain text.
+
+Click any image to open it full size. The server only serves files with an
+image extension (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP; up to 50 MB), and only
+to signed-in browsers when `PASSWORD` is set.
+
 ## How turns work
 
 - One conversation runs one turn at a time. While the agent is working, sending

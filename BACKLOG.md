@@ -2,6 +2,13 @@
 
 ## Completed
 
+### 2026-10-03 — Images shared by agents
+
+- Final behavior: Tool items carry an `images` list, shown as thumbnails below the tool card (visible while it is collapsed). Sources: image blocks in Claude tool results (Read, MCP screenshot tools), Codex `imageView`, `imageGeneration`, MCP and dynamic tool images, and opencode tool file attachments. Markdown images in replies that reference host files (absolute path, `file://`, or project-relative) are rewritten to `/api/file`, which serves image-extension files only, with `nosniff` and a sandboxing CSP for SVG. Clicking an image opens it full size, including data URLs (opened through a blob URL); images that fail to load show "Image not available".
+- Verification: `node --check` on all changed files, `git diff --check`, `/api/file` probes (image 200, missing 404, non-image and relative paths 400), Claude history for a session with 42 image tool results, markdown rewrite cases in headless Chrome, and a headless Chrome screenshot of that session.
+- Mentioned images: image file names in a finished reply (plain text or inline code, outside code blocks and links) get thumbnails under their paragraph or list item. Absolute and `~/` paths are used as-is; bare names match image paths seen in earlier tool calls; paths with a folder resolve against the project. Missing files are dropped silently; at most 24 per reply; skipped while a reply is streaming. Verified on a Claude chat whose summary named 8 screenshots by bare file name (all 8 shown, headless Chrome screenshot).
+- Remaining limitations: Codex and opencode image paths were written against their protocol schemas (Codex app-server 0.133, opencode's `ToolContent`) and not exercised in a live turn. Any image file on the host can be fetched by path by anyone who can reach the page.
+
 ### 2026-10-02 — Approval request navigation
 
 - Final behavior: An open chat with pending permission or question requests shows a Review control in the header with a count. It moves keyboard focus to the first request. The control disappears when all requests resolve. Screen readers receive announcements when requests arrive or resolve, including partial resolution. Existing request cards stay mounted across unrelated status events so question selections and focus are preserved.

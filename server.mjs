@@ -168,6 +168,18 @@ function validImages(list) {
   );
 }
 
+const FILE_TYPES = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+};
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
 const NAME = /^[\w.\/:@\[\]-]{1,200}$/; // model and effort values
 const SESSION_ID = /^[\w-]+$/;
 const validName = (v) => !v || (typeof v === 'string' && NAME.test(v)); // empty: the agent's default
@@ -239,6 +251,27 @@ const server = http.createServer(async (req, res) => {
       const backend = await backendFor(url.searchParams.get('agent') || 'claude');
       if (!backend?.usage) return send(res, 404, { error: 'No usage for this agent' });
       return send(res, 200, await backend.usage());
+    }
+
+    if (p === '/api/file' && req.method === 'GET') {
+      // Image files on this machine that an agent showed or linked to.
+      const asked = url.searchParams.get('path') || '';
+      const file = asked.startsWith('~/') ? path.join(os.homedir(), asked.slice(2)) : asked;
+      const type = FILE_TYPES[path.extname(file).toLowerCase()];
+      if (!path.isAbsolute(file) || !type) return send(res, 400, { error: 'Not an image path' });
+      let stat;
+      try {
+        stat = fs.statSync(file);
+      } catch {
+        return send(res, 404, { error: 'File not found' });
+      }
+      if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return send(res, 404, { error: 'File not found' });
+      return send(res, 200, fs.readFileSync(file), {
+        'content-type': type,
+        'x-content-type-options': 'nosniff',
+        // SVG can carry scripts; never let one run on this origin.
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      });
     }
 
     if (p === '/api/projects') return send(res, 200, await listProjects());

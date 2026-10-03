@@ -17,6 +17,7 @@ const ui = {
   options: new Map(), // agent -> composer options from the server
   items: new Map(), // id -> transcript item (see lib/items.mjs)
   els: new Map(), // id -> rendered element
+  imagePaths: new Set(), // absolute image paths the agent's tools touched
 };
 let pendingAnnouncementTimer = 0;
 
@@ -344,6 +345,7 @@ function resetView() {
   $('messages').innerHTML = '';
   ui.items.clear();
   ui.els.clear();
+  ui.imagePaths.clear();
   ui.mode = null;
   ui.pending = [];
   clearTimeout(pendingAnnouncementTimer);
@@ -414,6 +416,76 @@ function md(text) {
   return DOMPurify.sanitize(marked.parse(text || '', { breaks: false, gfm: true }));
 }
 
+// Markdown images that point at files on the host (an absolute path, a
+// file:// URL or a path relative to the project) can't load in another
+// device's browser, so they're fetched through the server instead. This runs
+// before DOMPurify's URL check, which would drop file:// URLs.
+function hostImage(src) {
+  if (/^(https?:|data:|blob:|\/api\/)/i.test(src)) return src;
+  let file = src;
+  if (/^file:\/\//i.test(src)) {
+    try {
+      file = decodeURIComponent(new URL(src).pathname);
+    } catch {
+      return src;
+    }
+  } else if (/^[a-z][\w+.-]*:/i.test(src)) {
+    return src;
+  } else if (!src.startsWith('/')) {
+    if (!ui.dir) return src;
+    file = ui.dir + '/' + src.replace(/^\.\//, '');
+  }
+  return '/api/file?path=' + encodeURIComponent(file);
+}
+
+DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+  if (node.nodeName === 'IMG' && data.attrName === 'src') data.attrValue = hostImage(data.attrValue.trim());
+});
+
+// Image files a reply mentions by name, e.g. `web-1-entry.png` or
+// /tmp/shots/home.png, get thumbnails under the paragraph or list item that
+// mentions them. Bare names are matched against paths the agent's tools used
+// earlier in the chat; paths with a folder are taken relative to the project.
+const ABSOLUTE_IMAGE = /~?\/[^\s"'`<>()[\]{}|;,\\]*\.(?:png|jpe?g|gif|webp|svg|avif|bmp)\b/gi;
+const MENTIONED_IMAGE = /(?:~\/|\.{0,2}\/)?[\w.@+-]+(?:\/[\w.@+-]+)*\.(?:png|jpe?g|gif|webp|svg|avif|bmp)\b/gi;
+const MAX_MENTIONED = 24;
+
+function rememberImagePaths(item) {
+  if (item.kind !== 'tool') return;
+  for (const m of (item.detail || '').matchAll(ABSOLUTE_IMAGE)) ui.imagePaths.add(m[0]);
+}
+
+function resolveMention(name) {
+  if (name.startsWith('/') || name.startsWith('~/')) return name;
+  const rel = name.replace(/^\.\//, '');
+  for (const known of ui.imagePaths) if (known.endsWith('/' + rel)) return known;
+  return rel.includes('/') && ui.dir ? ui.dir + '/' + rel : null;
+}
+
+function addMentionedImages(root) {
+  const seen = new Set([...root.querySelectorAll('img')].map((img) => img.getAttribute('src')));
+  const byBlock = new Map();
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node; (node = walker.nextNode()); ) {
+    if (node.parentElement.closest('pre, a')) continue;
+    for (const m of node.data.matchAll(MENTIONED_IMAGE)) {
+      const file = resolveMention(m[0]);
+      const src = file && '/api/file?path=' + encodeURIComponent(file);
+      if (!src || seen.has(src) || seen.size >= MAX_MENTIONED) continue;
+      seen.add(src);
+      const block = node.parentElement.closest('li, p, td, th, h1, h2, h3, h4, h5, h6, blockquote') || root;
+      if (!byBlock.has(block)) byBlock.set(block, []);
+      byBlock.get(block).push(src);
+    }
+  }
+  for (const [block, images] of byBlock) {
+    const row = imageRow(images, { quiet: true });
+    row.classList.add('mentioned');
+    if (block === root || block.matches('li, td, th, blockquote')) block.appendChild(row);
+    else block.after(row);
+  }
+}
+
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -437,32 +509,57 @@ function append(node) {
   if (stick) scrollToBottom(true);
 }
 
-// A user bubble: optional image thumbnails (click to open full size) and text.
+// Opens an image full size in a new tab. Data URLs can't be opened as a
+// top-level page, so those are shown through a blob URL instead.
+async function openImage(src) {
+  if (!src.startsWith('data:')) return window.open(src, '_blank');
+  const tab = window.open('', '_blank');
+  const blob = await (await fetch(src)).blob();
+  if (tab) tab.location.href = URL.createObjectURL(blob);
+}
+
+// Image thumbnails; click to open full size. `quiet` drops images that fail
+// to load instead of saying so (guessed paths may not exist).
+function imageRow(images, { quiet = false } = {}) {
+  const row = el('div', 'msg-images');
+  for (const src of images) {
+    const img = el('img');
+    img.src = src;
+    img.alt = '';
+    img.addEventListener('click', () => openImage(src));
+    img.addEventListener('error', () => {
+      if (!quiet) return img.replaceWith(el('span', 'img-missing', 'Image not available'));
+      img.remove();
+      if (!row.children.length) row.remove();
+    });
+    row.appendChild(img);
+  }
+  return row;
+}
+
+// A user bubble: optional image thumbnails and text.
 function userBubble(text, images) {
   const d = el('div', 'msg-user');
-  if (images.length) {
-    const row = el('div', 'msg-images');
-    for (const src of images) {
-      const img = el('img');
-      img.src = src;
-      img.addEventListener('click', () => window.open(src, '_blank'));
-      row.appendChild(img);
-    }
-    d.appendChild(row);
-  }
+  if (images.length) d.appendChild(imageRow(images));
   if (text) d.appendChild(el('div', 'msg-text', text));
   return d;
 }
 
 const TOOL_STATE = { running: '…', done: 'done', error: 'error' };
 
-function renderItem(item) {
+// `streaming`: a reply still being typed, redrawn every frame.
+function renderItem(item, streaming) {
   switch (item.kind) {
     case 'user':
       return userBubble(item.text || '', item.images || []);
     case 'text': {
       const d = el('div', 'msg-assistant');
       d.innerHTML = md(item.text);
+      for (const img of d.querySelectorAll('img')) {
+        if (img.closest('a')) continue;
+        img.addEventListener('click', () => openImage(img.src));
+      }
+      if (!streaming) addMentionedImages(d);
       return d;
     }
     case 'thinking': {
@@ -484,7 +581,11 @@ function renderItem(item) {
       if (item.detail) body.appendChild(el('pre', '', item.detail));
       if (item.output) body.appendChild(el('pre', '', item.output));
       d.append(s, body);
-      return d;
+      if (!item.images?.length) return d;
+      // Pictures the tool returned stay visible while the card is collapsed.
+      const wrap = el('div', 'tool-wrap');
+      wrap.append(d, imageRow(item.images));
+      return wrap;
     }
     case 'notice':
       return el('div', 'result-line' + (item.error ? ' err' : ''), item.text);
@@ -494,7 +595,7 @@ function renderItem(item) {
 
 // Adds an item, or merges it into the one with the same id and redraws that
 // in place. `replaces` swaps out an earlier item (a streamed draft).
-function upsert(patch) {
+function upsert(patch, streaming) {
   const item = { ...ui.items.get(patch.id), ...patch };
   let old = ui.els.get(item.id);
   const draft = item.replaces && ui.els.get(item.replaces);
@@ -505,9 +606,11 @@ function upsert(patch) {
     else old = draft;
   }
   ui.items.set(item.id, item);
-  const node = renderItem(item);
+  rememberImagePaths(item);
+  const node = renderItem(item, streaming);
   if (old) {
-    if (old.open) node.open = true;
+    const card = (n) => (n.matches('.tool-wrap') ? n.firstChild : n);
+    if (card(old).open) card(node).open = true;
     const stick = nearBottom();
     old.replaceWith(node);
     if (stick) scrollToBottom(true);
@@ -527,7 +630,7 @@ function applyDelta(id, text) {
   dirty.add(id);
   deltaRaf ||= requestAnimationFrame(() => {
     deltaRaf = 0;
-    for (const d of dirty) if (ui.items.has(d)) upsert(ui.items.get(d));
+    for (const d of dirty) if (ui.items.has(d)) upsert(ui.items.get(d), true);
     dirty.clear();
   });
 }
