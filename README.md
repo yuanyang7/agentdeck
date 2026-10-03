@@ -146,3 +146,29 @@ launchctl load ~/Library/LaunchAgents/com.agentdeck.plist
 
 Also make sure the host doesn't sleep while you're away (System Settings →
 Energy → "Prevent automatic sleeping when the display is off").
+
+## Troubleshooting
+
+**Every page returns a 500 error mentioning a path that doesn't exist.** The
+server keeps the absolute path of the folder it was started from. If that
+folder is renamed or moved while the server is running (for example
+`~/code/claude-web` → `~/code/agentdeck`), requests fail with
+`ENOENT ... <old path>/public/index.html`. Restart the server from the new
+location:
+
+```bash
+pkill -f 'node server.mjs'; cd ~/code/agentdeck && nohup npm start > /tmp/agentdeck.log 2>&1 &
+```
+
+With the LaunchAgent, update the paths in the plist, then
+`launchctl unload` and `launchctl load` it again.
+
+**Restarting from inside agentdeck.** Asking an agent in agentdeck to rename
+the project folder or restart the server stops the conversation doing the
+work, because that conversation runs inside the server. Make changes like
+these from a terminal on the host.
+
+**Checking whether it's up.** On the host, `curl -i http://localhost:7878/`
+should return `200`, and `lsof -nP -iTCP:7878 -sTCP:LISTEN` shows the running
+process. Its output goes to `/tmp/agentdeck.log` when started as above or by
+the LaunchAgent.
