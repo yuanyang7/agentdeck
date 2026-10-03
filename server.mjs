@@ -16,6 +16,7 @@ import { Hub, BusyError } from './lib/hub.mjs';
 import { backends, availableBackends } from './lib/agents/index.mjs';
 import { tagsOf, setTags, quickTags, setQuickTags } from './lib/tags.mjs';
 import { isUnread, markRead } from './lib/reads.mjs';
+import { modelOf } from './lib/models.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 7878);
@@ -169,6 +170,7 @@ function validImages(list) {
 
 const NAME = /^[\w.\/:@\[\]-]{1,200}$/; // model and effort values
 const SESSION_ID = /^[\w-]+$/;
+const validName = (v) => !v || (typeof v === 'string' && NAME.test(v)); // empty: the agent's default
 
 function validAnswers(a) {
   return a === undefined || (Array.isArray(a) && a.every((x) => Array.isArray(x) && x.every((s) => typeof s === 'string')));
@@ -261,7 +263,7 @@ const server = http.createServer(async (req, res) => {
         markRead(agent, sessionId);
         hub.broadcast({ type: 'sessions_changed', dir });
       }
-      return send(res, 200, { items, live: conv ? hub.snapshot(conv) : null });
+      return send(res, 200, { items, live: conv ? hub.snapshot(conv) : null, model: sessionId ? modelOf(agent, sessionId) : null });
     }
 
     if (p === '/api/send' && req.method === 'POST') {
@@ -280,7 +282,7 @@ const server = http.createServer(async (req, res) => {
       const opts = await backend.options();
       const settings = { mode: mode || opts.defaultMode, model, effort };
       if (!opts.modes.some((x) => x.value === settings.mode)) return send(res, 400, { error: 'Bad mode' });
-      if ((model && !NAME.test(model)) || (effort && !NAME.test(effort))) return send(res, 400, { error: 'Bad model or effort' });
+      if (!validName(model) || !validName(effort)) return send(res, 400, { error: 'Bad model or effort' });
       if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
         return send(res, 400, { error: 'Project folder not found' });
       }
@@ -312,6 +314,16 @@ const server = http.createServer(async (req, res) => {
       const opts = conv && (await backends.get(conv.agent).options());
       if (conv && !opts.modes.some((x) => x.value === mode)) return send(res, 400, { error: 'Bad mode' });
       await hub.setMode(key, mode);
+      return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/model' && req.method === 'POST') {
+      // The pickers changed in an open chat: remember it for every device.
+      const { agent, sessionId, model, effort } = await readJson(req);
+      if (!backends.has(agent)) return send(res, 400, { error: 'Unknown agent' });
+      if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) return send(res, 400, { error: 'Bad session' });
+      if (!validName(model) || !validName(effort)) return send(res, 400, { error: 'Bad model or effort' });
+      hub.modelChanged(agent, sessionId, { model, effort });
       return send(res, 200, { ok: true });
     }
 

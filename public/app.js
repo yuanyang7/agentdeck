@@ -9,6 +9,7 @@ const ui = {
   sessionId: null,
   running: false,
   mode: null, // mode reported by the live conversation, if any
+  model: null, // { model, effort } the open chat uses, as stored on the server
   pending: [],
   sessions: [],
   tagFilter: null, // tag the chat list is filtered to, or null
@@ -375,6 +376,7 @@ async function openConversation(agent, id) {
   const temp = id.startsWith('new-');
   ui.key = temp ? id : `${agent}:${id}`;
   ui.sessionId = temp ? null : id;
+  ui.model = null;
   const key = ui.key;
   resetView();
   selectAgent(agent);
@@ -390,6 +392,9 @@ async function openConversation(agent, id) {
     s.unread = false; // the GET above marked the chat read on the server
     renderSessions();
   }
+  // Chats from before models were stored per chat show the agent's default.
+  ui.model = data.model || { model: null, effort: null };
+  fillModels();
   for (const item of data.items) upsert(item);
   if (data.live) {
     for (const item of data.live.items) upsert(item);
@@ -580,6 +585,13 @@ function connectEvents() {
       if (ev.dir === ui.dir) loadSessions();
       return;
     }
+    if (ev.type === 'model_changed') {
+      if (ev.agent === ui.agent && ev.sessionId === ui.sessionId && !samePick(ev.model, ui.model)) {
+        ui.model = ev.model;
+        fillModels().then(() => modelNotice('Now using', 'changed on another device'));
+      }
+      return;
+    }
     if (ev.type === 'sessions_changed') {
       if (ev.dir === ui.dir) loadSessions();
       return;
@@ -748,28 +760,46 @@ async function selectAgent(agent) {
   $('status').removeAttribute('role');
   if (!ui.running) $('status').textContent = '';
   fillSelect($('mode'), o.modes.map((m) => [m.value, m.label]), ui.mode || o.defaultMode);
-  fillSelect(
-    $('model'),
-    [['', o.defaultModel ? `Default (${o.defaultModel})` : 'Default model'], ...o.models.map((m) => [m.value, m.label])],
-    localStorage.getItem('cw_model:' + agent) || '',
-  );
-  fillEfforts();
+  fillModels();
   $('attach').classList.toggle('hidden', !o.images);
   $('toggle-usage').classList.toggle('hidden', !o.usage);
   if (!o.usage) $('usage').classList.add('hidden');
   else if (!$('usage').classList.contains('hidden')) loadUsage();
 }
 
+// An open chat keeps the model and effort stored for it on the server, so
+// every device continues it the same way. A new chat starts with the ones
+// last picked for a new chat in this browser.
+function picked() {
+  if (ui.key) return ui.model || { model: null, effort: null };
+  return { model: localStorage.getItem('cw_model:' + ui.agent), effort: localStorage.getItem('cw_effort:' + ui.agent) };
+}
+
+const samePick = (a, b) => (a?.model || null) === (b?.model || null) && (a?.effort || null) === (b?.effort || null);
+
+async function fillModels() {
+  const agent = ui.agent;
+  const o = await loadOptions(agent);
+  if (ui.agent !== agent) return;
+  fillSelect(
+    $('model'),
+    [['', o.defaultModel ? `Default (${o.defaultModel})` : 'Default model'], ...o.models.map((m) => [m.value, m.label])],
+    picked().model || '',
+  );
+  await fillEfforts();
+}
+
 // Some agents have efforts per model, so this follows the model picker.
 async function fillEfforts() {
   const agent = ui.agent;
   const o = await loadOptions(agent);
+  if (ui.agent !== agent) return;
   const model = o.models.find((m) => m.value === $('model').value) || o.models.find((m) => m.label === o.defaultModel);
   const efforts = model?.efforts ? model.efforts.map((v) => [v, `${v[0].toUpperCase()}${v.slice(1)} effort`]) : o.efforts.map((e) => [e.value, e.label]);
   fillSelect(
     $('effort'),
     [['', o.defaultEffort ? `Default (${o.defaultEffort})` : 'Default effort'], ...efforts],
-    localStorage.getItem('cw_effort:' + agent) || '',
+    picked().effort || '',
   );
   $('effort').classList.toggle('hidden', !efforts.length);
 }
@@ -779,13 +809,39 @@ $('agent').addEventListener('change', () => {
   selectAgent($('agent').value);
 });
 
-// The chosen model and effort are remembered per agent in this browser and
-// apply to the next message.
-$('model').addEventListener('change', () => {
-  localStorage.setItem('cw_model:' + ui.agent, $('model').value);
-  fillEfforts();
+// A change applies from the next message. In an open chat it is stored for
+// the chat, and other devices showing it follow along; otherwise it is
+// remembered in this browser for new chats.
+async function pickChanged(before = ui.model) {
+  const next = { model: $('model').value || null, effort: $('effort').value || null };
+  if (!ui.key) {
+    localStorage.setItem('cw_model:' + ui.agent, next.model || '');
+    localStorage.setItem('cw_effort:' + ui.agent, next.effort || '');
+    return;
+  }
+  if (samePick(next, before)) return;
+  ui.model = next;
+  modelNotice('Switched to', 'from the next message');
+  if (ui.sessionId) {
+    api('/api/model', { agent: ui.agent, sessionId: ui.sessionId, ...next }).catch((err) => alert(err.message));
+  }
+}
+
+// A line in the transcript so a model switch is never silent.
+function modelNotice(prefix, suffix) {
+  let text = $('model').selectedOptions[0]?.textContent || 'Default model';
+  if (!$('effort').classList.contains('hidden')) text += ' · ' + ($('effort').selectedOptions[0]?.textContent || 'Default effort');
+  upsert({ id: 'model-' + randomId(), kind: 'notice', text: `${prefix} ${text} (${suffix})` });
+}
+
+$('model').addEventListener('change', async () => {
+  const before = ui.model;
+  // Keeps the effort if the new model offers it; fillEfforts falls back otherwise.
+  if (ui.key) ui.model = { ...ui.model, model: $('model').value || null };
+  await fillEfforts();
+  pickChanged(before);
 });
-$('effort').addEventListener('change', () => localStorage.setItem('cw_effort:' + ui.agent, $('effort').value));
+$('effort').addEventListener('change', () => pickChanged());
 
 // ---------- composer ----------
 
@@ -914,6 +970,7 @@ $('composer').addEventListener('submit', async (e) => {
   if (isNew) {
     // Our own temp key, so events sent before the reply already reach us.
     ui.key = 'new-' + randomId();
+    ui.model = { model: $('model').value || null, effort: $('effort').value || null };
     $('agent').disabled = true;
     $('title').textContent = text.split('\n')[0].slice(0, 80) || '(image)';
   }
