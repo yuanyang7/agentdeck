@@ -1,5 +1,6 @@
-// claude-web: a small web UI for driving coding-agent conversations (Claude
-// Code, opencode) on this machine from other devices on your Tailscale network.
+// agentdeck: a small web UI for driving coding-agent conversations (Claude
+// Code, Codex, opencode) on this machine from other devices on your Tailscale
+// network.
 //
 // This file is the HTTP layer. Live turns are run by lib/hub.mjs, and each
 // agent is adapted to a common shape in lib/agents/.
@@ -57,7 +58,7 @@ function parseCookies(req) {
 
 function authed(req) {
   if (!PASSWORD) return true;
-  return tokens.has(parseCookies(req).cw_token);
+  return tokens.has(parseCookies(req).agentdeck_token);
 }
 
 function safeEqual(a, b) {
@@ -194,7 +195,7 @@ const server = http.createServer(async (req, res) => {
         const t = crypto.randomBytes(32).toString('hex');
         tokens.add(t);
         return send(res, 200, { ok: true }, {
-          'set-cookie': `cw_token=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`,
+          'set-cookie': `agentdeck_token=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`,
         });
       }
       return send(res, 401, { error: 'Wrong password' });
@@ -333,7 +334,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`claude-web listening on http://${HOST}:${PORT}`);
+  console.log(`agentdeck listening on http://${HOST}:${PORT}`);
   const name = HOST.startsWith('100.') && magicDnsName();
   if (name) console.log(`Open from other devices: http://${name}:${PORT}  (or http://${name.split('.')[0]}:${PORT})`);
   console.log(PASSWORD ? 'Password protection: on' : 'Password protection: off (set PASSWORD to enable)');

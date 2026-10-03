@@ -1,4 +1,4 @@
-# claude-web
+# agentdeck
 
 A small web page for driving coding-agent conversations (Claude Code, Codex
 and opencode) on this machine from any other device on your Tailscale network.
@@ -82,9 +82,10 @@ Hover a conversation in the sidebar and click the tag button to edit its tags
 **quick tags** to add or remove it. Every tag you apply is remembered as a quick
 tag; the × next to a quick tag forgets it (chats keep the tags they already
 have). Tags show under the chat, and a row of tag chips above the list filters
-it. Everything is saved on the host in `~/.claude-web/tags.json`, so every
-device sees the same tags and quick tags. They are not written into the agents'
-transcripts.
+it. Everything is saved on the host in `~/.agentdeck/tags.json` (migrated
+automatically from `~/.claude-web/tags.json` if you used an older release), so
+every device sees the same tags and quick tags. They are not written into the
+agents' transcripts.
 
 ## Images
 
@@ -122,11 +123,11 @@ the conversation and can be sent with or without text.
 To start it at login and restart it if it crashes, use a LaunchAgent:
 
 ```bash
-cat > ~/Library/LaunchAgents/com.claude-web.plist <<EOF
+cat > ~/Library/LaunchAgents/com.agentdeck.plist <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.claude-web</string>
+  <key>Label</key><string>com.agentdeck</string>
   <key>ProgramArguments</key><array>
     <string>$(which node)</string><string>$(pwd)/server.mjs</string>
   </array>
@@ -136,11 +137,11 @@ cat > ~/Library/LaunchAgents/com.claude-web.plist <<EOF
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/claude-web.log</string>
-  <key>StandardErrorPath</key><string>/tmp/claude-web.log</string>
+  <key>StandardOutPath</key><string>/tmp/agentdeck.log</string>
+  <key>StandardErrorPath</key><string>/tmp/agentdeck.log</string>
 </dict></plist>
 EOF
-launchctl load ~/Library/LaunchAgents/com.claude-web.plist
+launchctl load ~/Library/LaunchAgents/com.agentdeck.plist
 ```
 
 Also make sure the host doesn't sleep while you're away (System Settings →
