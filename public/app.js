@@ -913,7 +913,7 @@ function usageRow(label, pct, resetsAt) {
   if (v >= 90) fill.classList.add('hot');
   bar.appendChild(fill);
   row.appendChild(bar);
-  const reset = resetsAt ? ' · resets ' + new Date(resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+  const reset = resetsAt ? ' · resets ' + new Date(resetsAt).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
   row.appendChild(el('span', 'u-pct', Math.round(v) + '%' + reset));
   return row;
 }
