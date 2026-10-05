@@ -34,6 +34,10 @@ shows up as another agent and uses its own login. Codex runs on the Codex login
 of this machine (your ChatGPT plan, or an API key); opencode uses its own
 providers.
 
+**Security:** anyone who can open this page can run commands on the host
+through the agents. Keep it on a private network like Tailscale, and set
+`PASSWORD` if others share that network.
+
 ### Options (environment variables)
 
 | Variable        | Default                     | Meaning                                                      |
