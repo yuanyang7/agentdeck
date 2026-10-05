@@ -135,11 +135,18 @@ prompt.
   one, gets an inline player. The server streams videos with byte ranges, so
   seeking works and Safari plays them. Whether a format plays depends on the
   browser (`.mov` is reliable only in Safari).
+- Audio works the same way, with a compact player: `.mp3`, `.m4a`, `.aac`,
+  `.wav`, `.ogg`, `.oga`, `.opus` and `.flac` files linked as markdown images
+  (`![voice](out/take.mp3)`) or named in a reply. Sound clips a tool returns
+  directly (MCP `audio` content in Codex, audio attachments in opencode) play
+  under the tool card. A `.webm` always gets a video player, even when it only
+  holds audio.
 
 Larger images are downscaled in the browser before upload. The server only
 serves files with an image extension (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP;
-up to 50 MB) or a video extension (MP4, M4V, MOV, WebM; no size limit), and
-only to signed-in browsers when `PASSWORD` is set.
+up to 50 MB), a video extension (MP4, M4V, MOV, WebM) or an audio extension
+(MP3, M4A, AAC, WAV, Ogg, OGA, Opus, FLAC); videos and audio have no size
+limit. It only serves them to signed-in browsers when `PASSWORD` is set.
 
 ## Sounds
 

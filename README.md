@@ -74,8 +74,9 @@ device, but are never written into the agents' own transcripts.
 Attach up to 10 images to a message — click 📎, paste, or drag files onto the
 composer — and images the agent shares back (screenshots, tool output,
 generated images) appear inline too, loaded from the host so every device
-sees them. Click any image to view it full size. Videos the agent links or
-names (MP4, MOV, WebM) play inline. See
+sees them. Click any image to view it full size. Videos (MP4, MOV, WebM)
+and audio (MP3, M4A, WAV, Ogg, FLAC) the agent links, names or returns from
+a tool play inline. See
 [docs/REFERENCE.md](docs/REFERENCE.md#images) for how images and file-name
 mentions are matched.
 

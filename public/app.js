@@ -551,7 +551,7 @@ function md(text) {
   return DOMPurify.sanitize(marked.parse(text || '', { breaks: false, gfm: true }));
 }
 
-// Markdown images and videos that point at files on the host (an absolute
+// Markdown images, videos and audio that point at files on the host (an absolute
 // path, a file:// URL or a path relative to the project) can't load in another
 // device's browser, so they're fetched through the server instead. This runs
 // before DOMPurify's URL check, which would drop file:// URLs.
@@ -574,18 +574,19 @@ function hostFile(src) {
 }
 
 DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
-  if (/^(IMG|VIDEO|SOURCE)$/.test(node.nodeName) && data.attrName === 'src') data.attrValue = hostFile(data.attrValue.trim());
+  if (/^(IMG|VIDEO|AUDIO|SOURCE)$/.test(node.nodeName) && data.attrName === 'src') data.attrValue = hostFile(data.attrValue.trim());
 });
 
-// Image and video files a reply mentions by name, e.g. `web-1-entry.png` or
-// /tmp/shots/demo.mp4, get thumbnails or players under the paragraph or list
-// item that mentions them. Bare names are matched against paths the agent's
-// tools used earlier in the chat; paths with a folder are taken relative to
-// the project.
-const MEDIA_EXT = '(?:png|jpe?g|gif|webp|svg|avif|bmp|mp4|m4v|mov|webm)';
+// Image, video and audio files a reply mentions by name, e.g.
+// `web-1-entry.png`, /tmp/shots/demo.mp4 or out/narration.mp3, get thumbnails
+// or players under the paragraph or list item that mentions them. Bare names
+// are matched against paths the agent's tools used earlier in the chat; paths
+// with a folder are taken relative to the project.
+const MEDIA_EXT = '(?:png|jpe?g|gif|webp|svg|avif|bmp|mp4|m4v|mov|webm|mp3|m4a|aac|wav|ogg|oga|opus|flac)';
 const ABSOLUTE_IMAGE = new RegExp(`~?/[^\\s"'\`<>()[\\]{}|;,\\\\]*\\.${MEDIA_EXT}\\b`, 'gi');
 const MENTIONED_IMAGE = new RegExp(`(?:~/|\\.{0,2}/)?[\\w.@+-]+(?:/[\\w.@+-]+)*\\.${MEDIA_EXT}\\b`, 'gi');
 const VIDEO_FILE = /\.(?:mp4|m4v|mov|webm)$/i;
+const AUDIO_FILE = /\.(?:mp3|m4a|aac|wav|ogg|oga|opus|flac)$/i;
 const MAX_MENTIONED = 24;
 
 function rememberImagePaths(item) {
@@ -601,7 +602,7 @@ function resolveMention(name) {
 }
 
 function addMentionedImages(root) {
-  const seen = new Set([...root.querySelectorAll('img, video')].map((m) => m.getAttribute('src')));
+  const seen = new Set([...root.querySelectorAll('img, video, audio')].map((m) => m.getAttribute('src')));
   const byBlock = new Map();
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node; (node = walker.nextNode()); ) {
@@ -656,32 +657,36 @@ async function openImage(src) {
   if (tab) tab.location.href = URL.createObjectURL(blob);
 }
 
-// Whether a src is a video, judged by its file extension (for /api/file
-// URLs, the extension of the host path).
-function isVideo(src) {
-  if (src.startsWith('data:')) return src.startsWith('data:video/');
+// 'video', 'audio' or 'image' for a src, judged by its file extension (for
+// /api/file URLs, the extension of the host path).
+function mediaKind(src) {
+  if (src.startsWith('data:')) return /^data:(video|audio)\//.exec(src)?.[1] || 'image';
   try {
     const u = new URL(src, location.href);
-    return VIDEO_FILE.test(u.pathname === '/api/file' ? u.searchParams.get('path') || '' : u.pathname);
+    const file = u.pathname === '/api/file' ? u.searchParams.get('path') || '' : u.pathname;
+    return VIDEO_FILE.test(file) ? 'video' : AUDIO_FILE.test(file) ? 'audio' : 'image';
   } catch {
-    return false;
+    return 'image';
   }
 }
 
-// An inline player. `onMissing` runs if the video can't be loaded.
-function videoEl(src, onMissing) {
-  const v = el('video');
-  v.src = src;
-  v.controls = true;
-  v.playsInline = true;
-  v.preload = 'metadata';
-  v.addEventListener('error', () => onMissing?.(v));
-  return v;
+const MEDIA_LABEL = { video: 'Video', audio: 'Audio', image: 'Image' };
+
+// An inline video or audio player. `onMissing` runs if the file can't be
+// loaded.
+function playerEl(kind, src, onMissing) {
+  const p = el(kind);
+  p.src = src;
+  p.controls = true;
+  p.preload = 'metadata';
+  if (kind === 'video') p.playsInline = true;
+  p.addEventListener('error', () => onMissing?.(p));
+  return p;
 }
 
-// Image thumbnails and video players; click an image to open it full size.
-// `quiet` drops files that fail to load instead of saying so (guessed paths
-// may not exist).
+// Image thumbnails and video and audio players; click an image to open it
+// full size. `quiet` drops files that fail to load instead of saying so
+// (guessed paths may not exist).
 function imageRow(images, { quiet = false } = {}) {
   const row = el('div', 'msg-images');
   const missing = (node, what) => {
@@ -690,8 +695,9 @@ function imageRow(images, { quiet = false } = {}) {
     if (!row.children.length) row.remove();
   };
   for (const src of images) {
-    if (isVideo(src)) {
-      row.appendChild(videoEl(src, (v) => missing(v, 'Video')));
+    const kind = mediaKind(src);
+    if (kind !== 'image') {
+      row.appendChild(playerEl(kind, src, (p) => missing(p, MEDIA_LABEL[kind])));
       continue;
     }
     const img = el('img');
@@ -768,9 +774,10 @@ function renderItem(item, streaming) {
       const d = el('div', 'msg-assistant');
       d.innerHTML = md(item.text);
       for (const img of d.querySelectorAll('img')) {
-        // ![demo](clip.mp4) plays inline.
-        if (isVideo(img.getAttribute('src') || '')) {
-          img.replaceWith(videoEl(img.getAttribute('src'), (v) => v.replaceWith(el('span', 'img-missing', 'Video not available'))));
+        // ![demo](clip.mp4) and ![voice](take.mp3) play inline.
+        const kind = mediaKind(img.getAttribute('src') || '');
+        if (kind !== 'image') {
+          img.replaceWith(playerEl(kind, img.getAttribute('src'), (p) => p.replaceWith(el('span', 'img-missing', `${MEDIA_LABEL[kind]} not available`))));
           continue;
         }
         if (img.closest('a')) continue;

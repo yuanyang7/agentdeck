@@ -211,8 +211,16 @@ const FILE_TYPES = {
   '.m4v': 'video/mp4',
   '.mov': 'video/quicktime',
   '.webm': 'video/webm',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.flac': 'audio/flac',
 };
-const MAX_IMAGE_FILE_BYTES = 50 * 1024 * 1024; // videos are streamed, so they have no cap
+const MAX_IMAGE_FILE_BYTES = 50 * 1024 * 1024; // videos and audio are streamed, so they have no cap
 
 // The byte range a `Range: bytes=a-b` header asks for, or null for the whole
 // file. Throws when the range can't be satisfied.
@@ -320,21 +328,22 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/file' && req.method === 'GET') {
-      // Image and video files on this machine that an agent showed or linked to.
+      // Image, video and audio files on this machine that an agent showed or
+      // linked to.
       const asked = url.searchParams.get('path') || '';
       const file = asked.startsWith('~/') ? path.join(os.homedir(), asked.slice(2)) : asked;
       const type = FILE_TYPES[path.extname(file).toLowerCase()];
-      if (!path.isAbsolute(file) || !type) return send(res, 400, { error: 'Not an image or video path' });
+      if (!path.isAbsolute(file) || !type) return send(res, 400, { error: 'Not an image, video or audio path' });
       let stat;
       try {
         stat = fs.statSync(file);
       } catch {
         return send(res, 404, { error: 'File not found' });
       }
-      const video = type.startsWith('video/');
-      if (!stat.isFile() || (!video && stat.size > MAX_IMAGE_FILE_BYTES)) return send(res, 404, { error: 'File not found' });
-      // Players fetch videos in ranges to seek, and Safari won't play one
-      // without them.
+      const streamed = /^(video|audio)\//.test(type);
+      if (!stat.isFile() || (!streamed && stat.size > MAX_IMAGE_FILE_BYTES)) return send(res, 404, { error: 'File not found' });
+      // Players fetch videos and audio in ranges to seek, and Safari won't
+      // play them without that.
       let range;
       try {
         range = byteRange(req.headers.range, stat.size);

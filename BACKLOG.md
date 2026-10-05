@@ -2,6 +2,12 @@
 
 ## Completed
 
+### 2026-10-05 — Audio shared by agents
+
+- Final behavior: Audio files (`.mp3`, `.m4a`, `.aac`, `.wav`, `.ogg`, `.oga`, `.opus`, `.flac`) get an inline player wherever videos already did: markdown images in a reply (`![voice](take.mp3)`), audio file names a reply mentions (same matching rules as images and videos), and tool `images` lists. Tools can also return audio directly: MCP `audio` content in Codex and audio file attachments in opencode both appear as players under the tool card, and Codex no longer prints those clips as base64 JSON. `/api/file` serves audio types with byte ranges and no size cap, the same as video. A missing file shows "Audio not available", or is dropped silently when its name was only mentioned.
+- Verification: `node --check` on all changed files. `/api/file` returned 200 with the right type for MP3, WAV, M4A and Ogg, 206 with a correct `content-range` for a bounded range, 416 for an unsatisfiable one, 404 for a missing file and 400 for a non-media extension. Headless Chrome loaded a markdown MP3, a mentioned absolute WAV, a bare-name Ogg known from tool paths, and a tool's WAV data URL (all readyState 4, 3 s). The MP3 seeked to 1.5 s and played. A missing markdown `.flac` was labeled, a missing mentioned MP3 was dropped, and a video and an image next to them still rendered. Screenshot checked.
+- Remaining limitations: Claude Code tool results carry no audio blocks, so Claude's audio shows only when a reply references a file. Format support depends on the browser (FLAC and Opus/Ogg don't play in older Safari). A `.webm` is always given a video player, even when it only holds audio. Any audio file on the host can be fetched by path by anyone who can reach the page, as with images and videos.
+
 ### 2026-10-05 — Workspace index for agents
 
 - Final behavior: Each new conversation receives a map of the projects under `PROJECT_ROOTS`. For each project it has the name, path, first README paragraph (or `package.json` description), last chat date, latest three chat titles across all agents, and subfolders with chats. Claude Code gets it as `systemPrompt.append`, Codex as `developerInstructions` on `thread/start` (combined with any configured `developer_instructions`), and opencode as a session instruction entry. The hub builds it on a conversation's first turn and passes it as `turn.instructions`. `WORKSPACE_INDEX=off` disables it. The user's own global instruction files (`~/.codex/AGENTS.md`, opencode's config) are not touched.
