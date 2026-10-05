@@ -71,7 +71,7 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 
 /* Workspace */
 .app { display: flex; width: 100%; height: 100vh; height: 100dvh; overflow: hidden; }
-.sidebar { width: 292px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--border); }
+.sidebar { width: 310px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--border); }
 .sidebar-head { padding: 24px 17px 12px; display: flex; flex-direction: column; gap: 10px; }
 .brand-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 750; letter-spacing: -.05em; }
@@ -81,9 +81,20 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 #project { width: 100%; min-height: 43px; font-weight: 600; box-shadow: 0 1px 2px rgba(20, 30, 60, .03); }
 .new-chat { width: 100%; min-height: 43px; margin-top: 8px; text-align: left; padding: 9px 13px; }
 .new-chat span { margin-right: 7px; font-size: 19px; font-weight: 400; line-height: 0; vertical-align: -1px; }
-.sidebar-section-title { padding: 20px 25px 9px; }
+.sidebar-content { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-bottom: 18px; }
+.sidebar-section-title { padding: 20px 25px 9px; display: flex; justify-content: space-between; gap: 8px; }
+.sidebar-section-title span { letter-spacing: 0; text-transform: none; font-weight: 500; }
 .sidebar-foot { border-top: 1px solid var(--border); color: var(--muted); padding: 13px 24px calc(13px + env(safe-area-inset-bottom)); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sessions { list-style: none; margin: 0; padding: 0 9px 16px; overflow-y: auto; flex: 1; scrollbar-width: thin; }
+.workspace-group { margin: 3px 9px 11px; border: 1px solid var(--border); background: color-mix(in srgb, var(--card) 45%, transparent); border-radius: 14px; overflow: hidden; }
+.workspace-heading { width: 100%; border: 0; border-radius: 0; background: transparent; text-align: left; display: flex; flex-direction: column; gap: 1px; padding: 11px 13px; }
+.workspace-heading.selected { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.workspace-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 720; }
+.workspace-detail { color: var(--muted); font-size: 11px; }
+.workspace-more { margin: 0 12px 11px; padding: 3px 0; border: 0; background: transparent; color: var(--accent); font-size: 11px; font-weight: 650; }
+.attention-section { padding-bottom: 7px; border-bottom: 1px solid var(--border); }
+.attention-section .sessions { padding-bottom: 0; }
+.sessions { list-style: none; margin: 0; padding: 0 9px 4px; }
+.workspace-group .sessions { padding: 0 5px 5px; }
 .sessions li { position: relative; display: flex; flex-direction: column; gap: 4px; margin: 2px 0; padding: 11px 13px; border-radius: 12px; cursor: pointer; border: 1px solid transparent; }
 .sessions li:hover { background: color-mix(in srgb, var(--card) 66%, transparent); }
 .sessions li:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -94,9 +105,10 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 .sessions .s-meta { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 7px; animation: pulse 1.3s infinite; }
 .dot.unread { background: var(--accent); animation: none; }
+.dot.decision { background: var(--warn-ink); animation: none; }
 @keyframes pulse { 50% { opacity: .3; } }
 .s-tags, .tag-filter { display: flex; flex-wrap: wrap; gap: 5px; }
-.tag-filter { padding: 0 18px 12px; }
+.tag-filter { padding: 0 12px 10px; }
 .tag { border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--muted); padding: 2px 8px; font-size: 10px; }
 button.tag { cursor: pointer; }
 button.tag.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }

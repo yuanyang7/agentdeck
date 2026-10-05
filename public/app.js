@@ -12,6 +12,8 @@ const ui = {
   settings: null, // { model, effort, mode } the open chat uses, as stored on the server
   pending: [],
   sessions: [],
+  projects: [],
+  expandedWorkspace: null,
   tagFilter: null, // tag the chat list is filtered to, or null
   agents: [], // [{ id, label }] available on the host
   options: new Map(), // agent -> composer options from the server
@@ -82,8 +84,12 @@ $('login-form').addEventListener('submit', async (e) => {
 
 // ---------- projects & sessions ----------
 
+let projectLoadSeq = 0;
 async function loadProjects() {
+  const seq = ++projectLoadSeq;
   const projects = await api('/api/projects');
+  if (seq !== projectLoadSeq) return ui.projects;
+  ui.projects = projects;
   const sel = $('project');
   sel.innerHTML = '';
   for (const p of projects) {
@@ -97,6 +103,8 @@ async function loadProjects() {
   o.value = '__other__';
   o.textContent = 'Other folder…';
   sel.appendChild(o);
+  if (ui.dir) setProject(ui.dir);
+  renderSessions();
   return projects;
 }
 
@@ -129,7 +137,10 @@ $('project').addEventListener('change', async () => {
 
 async function loadSessions() {
   if (!ui.dir) return;
-  ui.sessions = await api('/api/sessions?dir=' + encodeURIComponent(ui.dir));
+  const dir = ui.dir;
+  const sessions = await api('/api/sessions?dir=' + encodeURIComponent(dir));
+  if (dir !== ui.dir) return;
+  ui.sessions = sessions;
   renderSessions();
 }
 
@@ -219,17 +230,17 @@ $('tag-form').addEventListener('submit', async (e) => {
   addDraftTag(); // whatever is still in the input counts
   const s = tagEd.session;
   try {
-    const r = await api('/api/tags', { agent: s.agent, sessionId: s.id, dir: ui.dir, tags: tagEd.draft });
+    const r = await api('/api/tags', { agent: s.agent, sessionId: s.id, dir: s.dir, tags: tagEd.draft });
     s.tags = r.tags;
     $('tag-dialog').close();
     renderSessions();
+    loadProjects();
   } catch (err) {
     alert('Could not save tags: ' + err.message);
   }
 });
 
-function renderTagFilter() {
-  const box = $('tag-filter');
+function renderTagFilter(box) {
   const counts = new Map();
   for (const s of ui.sessions) for (const t of s.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
   // A filter whose tag no longer exists would hide everything with no way back.
@@ -241,6 +252,7 @@ function renderTagFilter() {
     chip.type = 'button';
     chip.onclick = () => {
       ui.tagFilter = ui.tagFilter === t ? null : t;
+      ui.expandedWorkspace = ui.dir;
       renderSessions();
     };
     box.appendChild(chip);
@@ -248,22 +260,94 @@ function renderTagFilter() {
 }
 
 function renderSessions() {
-  const ul = $('sessions');
-  ul.innerHTML = '';
-  renderTagFilter();
-  for (const s of ui.sessions) {
-    if (ui.tagFilter && !(s.tags || []).includes(ui.tagFilter)) continue;
+  const attention = $('attention');
+  const workspaces = $('workspaces');
+  attention.innerHTML = '';
+  workspaces.innerHTML = '';
+  const needsAttention = ui.projects.flatMap((p) => p.attention || []).sort((a, b) =>
+    (b.pendingCount > 0) - (a.pendingCount > 0) || (b.updatedAt || 0) - (a.updatedAt || 0));
+  attention.classList.toggle('hidden', !needsAttention.length);
+  if (needsAttention.length) {
+    attention.appendChild(el('div', 'sidebar-section-title', 'NEEDS ATTENTION'));
+    const list = el('ul', 'sessions');
+    for (const s of needsAttention) list.appendChild(sessionRow(s, true));
+    attention.appendChild(list);
+  }
+  for (const p of ui.projects) {
+    const section = el('section', 'workspace-group');
+    const head = el('button', 'workspace-heading' + (p.dir === ui.dir ? ' selected' : ''));
+    head.type = 'button';
+    head.title = p.dir;
+    const name = el('span', 'workspace-name', p.name);
+    const counts = [];
+    const pending = p.attention.filter((s) => s.pendingCount).length;
+    const running = p.attention.filter((s) => s.running && !s.pendingCount).length;
+    const unread = p.attention.filter((s) => s.unread && !s.pendingCount && !s.running).length;
+    if (pending) counts.push(`${pending} decision${pending === 1 ? '' : 's'}`);
+    if (running) counts.push(`${running} working`);
+    if (unread) counts.push(`${unread} unread`);
+    const detail = el('span', 'workspace-detail', counts.join(' · ') || `${p.sessions} conversation${p.sessions === 1 ? '' : 's'}`);
+    head.append(name, detail);
+    head.onclick = async () => {
+      if (ui.dir !== p.dir) {
+        setProject(p.dir);
+        newConversation();
+        await loadSessions();
+      }
+      ui.expandedWorkspace = ui.expandedWorkspace === p.dir ? null : p.dir;
+      renderSessions();
+    };
+    section.appendChild(head);
+    const expanded = ui.expandedWorkspace === p.dir && ui.dir === p.dir;
+    const rows = expanded ? ui.sessions : [...p.recent];
+    const active = p.dir === ui.dir && ui.sessions.find((s) => s.key === ui.key);
+    if (!expanded && active && !rows.some((s) => s.key === active.key)) rows.push(active);
+    if (expanded) {
+      const filter = el('div', 'tag-filter');
+      renderTagFilter(filter);
+      section.appendChild(filter);
+    }
+    const list = el('ul', 'sessions');
+    for (const s of rows) {
+      if (expanded && ui.tagFilter && !(s.tags || []).includes(ui.tagFilter)) continue;
+      list.appendChild(sessionRow(s));
+    }
+    section.appendChild(list);
+    if (!expanded && p.sessions > p.recent.length) {
+      const more = el('button', 'workspace-more', `Show all ${p.sessions} conversations`);
+      more.type = 'button';
+      more.onclick = async () => {
+        if (ui.dir !== p.dir) { setProject(p.dir); newConversation(); await loadSessions(); }
+        ui.expandedWorkspace = p.dir;
+        renderSessions();
+      };
+      section.appendChild(more);
+    } else if (expanded && p.sessions > 3) {
+      const less = el('button', 'workspace-more', 'Show recent only');
+      less.type = 'button';
+      less.onclick = () => { ui.expandedWorkspace = null; renderSessions(); };
+      section.appendChild(less);
+    }
+    workspaces.appendChild(section);
+  }
+}
+
+function sessionRow(s, showWorkspace = false) {
     const li = document.createElement('li');
     li.tabIndex = 0;
     li.setAttribute('role', 'button');
-    if (s.key === ui.key) li.classList.add('active');
+    if (s.key === ui.key && s.dir === ui.dir) li.classList.add('active');
     const t = document.createElement('div');
     t.className = 's-title';
-    if (s.running) {
+    if (s.pendingCount) {
+      const d = el('span', 'dot decision');
+      d.title = 'Needs a decision';
+      t.appendChild(d);
+    } else if (s.running) {
       const d = document.createElement('span');
       d.className = 'dot';
       t.appendChild(d);
-    } else if (s.unread && s.key !== ui.key) {
+    } else if (s.unread && (s.key !== ui.key || s.dir !== ui.dir)) {
       // A turn finished here that this browser hasn't seen; opening the chat
       // counts as reading it. The open chat itself is never "unread".
       const d = document.createElement('span');
@@ -275,7 +359,9 @@ function renderSessions() {
     t.appendChild(document.createTextNode(s.title || 'Untitled'));
     const meta = el('div', 's-meta');
     if (ui.agents.length > 1) meta.appendChild(el('span', 'agent-badge', agentLabel(s.agent)));
-    meta.appendChild(document.createTextNode([timeAgo(s.updatedAt), s.branch].filter(Boolean).join(' · ')));
+    meta.appendChild(document.createTextNode([showWorkspace && ui.projects.find((p) => p.dir === s.dir)?.name,
+      s.pendingCount ? 'Needs decision' : s.running ? 'Working' : s.unread ? 'Finished · unread' : null,
+      timeAgo(s.updatedAt), s.branch].filter(Boolean).join(' · ')));
     li.append(t, meta);
     if (s.tags?.length) {
       const row = el('div', 's-tags');
@@ -295,16 +381,18 @@ function renderSessions() {
     li.onclick = () => {
       const keyboardFocus = document.activeElement === li;
       setSidebarOpen(false);
-      openConversation(s.agent, s.id || s.key);
-      if (keyboardFocus && !mobileSidebar.matches) $('sessions').querySelector('li.active')?.focus();
+      (async () => {
+        if (ui.dir !== s.dir) { setProject(s.dir); await loadSessions(); }
+        await openConversation(s.agent, s.id || s.key);
+        if (keyboardFocus && !mobileSidebar.matches) document.querySelector('.sessions li.active')?.focus();
+      })().catch((err) => alert(err.message));
     };
     li.onkeydown = (e) => {
       if (e.target !== li || (e.key !== 'Enter' && e.key !== ' ')) return;
       e.preventDefault();
       li.click();
     };
-    ul.appendChild(li);
-  }
+    return li;
 }
 
 $('new-chat').addEventListener('click', () => {
@@ -381,6 +469,7 @@ function newConversation() {
 
 // `id` is a session id, or the temp key of a conversation that is starting.
 async function openConversation(agent, id) {
+  const dir = ui.dir;
   const temp = id.startsWith('new-');
   ui.key = temp ? id : `${agent}:${id}`;
   ui.sessionId = temp ? null : id;
@@ -394,8 +483,8 @@ async function openConversation(agent, id) {
   $('title').textContent = s?.title || 'Conversation';
   $('subtitle').textContent = ui.dir;
 
-  const data = await api(`/api/sessions/${agent}/${encodeURIComponent(id)}?dir=${encodeURIComponent(ui.dir)}`);
-  if (ui.key !== key) return;
+  const data = await api(`/api/sessions/${agent}/${encodeURIComponent(id)}?dir=${encodeURIComponent(dir)}`);
+  if (ui.key !== key || ui.dir !== dir) return;
   if (s?.unread) {
     s.unread = false; // the GET above marked the chat read on the server
     renderSessions();
@@ -656,6 +745,7 @@ function markRead() {
     renderSessions();
   }
   api('/api/read', { key: ui.key, agent: ui.agent, sessionId: ui.sessionId, dir: ui.dir }).catch(() => {});
+  scheduleSidebarRefresh();
 }
 
 function applyStatus(st) {
@@ -697,6 +787,17 @@ function setRunning(running) {
   }
 }
 
+let sidebarRefreshTimer = 0;
+function scheduleSidebarRefresh() {
+  clearTimeout(sidebarRefreshTimer);
+  sidebarRefreshTimer = setTimeout(async () => {
+    try {
+      await loadProjects();
+      await loadSessions();
+    } catch (err) { console.error('Could not refresh sidebar:', err); }
+  }, 150);
+}
+
 function connectEvents() {
   const es = new EventSource('/api/events');
   es.onmessage = (e) => {
@@ -707,7 +808,7 @@ function connectEvents() {
         ui.sessionId = ev.sessionId;
         writeHash();
       }
-      if (ev.dir === ui.dir) loadSessions();
+      scheduleSidebarRefresh();
       return;
     }
     if (ev.type === 'settings_changed') {
@@ -718,26 +819,17 @@ function connectEvents() {
       return;
     }
     if (ev.type === 'sessions_changed') {
-      if (ev.dir === ui.dir) loadSessions();
+      scheduleSidebarRefresh();
       return;
     }
-    if (ev.type === 'status' && ev.dir === ui.dir) {
-      // Keep running dots in the sidebar fresh for other conversations.
-      const s = ui.sessions.find((x) => x.key === ev.key);
-      if (s && s.running !== ev.running) {
-        s.running = ev.running;
-        renderSessions();
-      } else if (!s && ev.running) {
-        loadSessions();
-      }
-    }
+    if (ev.type === 'status') scheduleSidebarRefresh();
     if (ui.key && ev.key === ui.key) handleTurnEvent(ev);
   };
   es.onerror = () => {
     // EventSource reconnects on its own; resync the open conversation when it does.
     es.onopen = () => {
       if (ui.key) openConversation(ui.agent, ui.sessionId || ui.key);
-      loadSessions();
+      scheduleSidebarRefresh();
     };
   };
 }

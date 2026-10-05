@@ -83,22 +83,44 @@ async function listProjects() {
     for (const e of entries) {
       if (!e.isDirectory() || e.name.startsWith('.')) continue;
       const dir = path.join(root, e.name);
-      byDir.set(dir, { dir, name: e.name, lastModified: 0, sessions: 0 });
+      byDir.set(dir, { dir, name: e.name, lastModified: 0, sessions: 0, recent: [], attention: [] });
     }
   }
-  const lists = await Promise.allSettled((await availableBackends()).map((b) => b.listSessions()));
-  for (const r of lists) {
+  const agents = await availableBackends();
+  const lists = await Promise.allSettled(agents.map((b) => b.listSessions()));
+  for (const [index, r] of lists.entries()) {
     if (r.status === 'rejected') {
       console.error('listSessions failed:', r.reason);
       continue;
     }
     for (const s of r.value) {
       if (!s.dir || !fs.existsSync(s.dir)) continue;
-      const p = byDir.get(s.dir) || { dir: s.dir, name: path.basename(s.dir), lastModified: 0, sessions: 0 };
+      const p = byDir.get(s.dir) || { dir: s.dir, name: path.basename(s.dir), lastModified: 0, sessions: 0, recent: [], attention: [] };
+      const agent = agents[index].id;
+      const key = `${agent}:${s.id}`;
+      const live = hub.get(key);
+      const chat = { ...s, agent, key, dir: s.dir, running: !!live?.running,
+        pendingCount: live?.pending.size || 0, unread: isUnread(agent, s.id), tags: tagsOf(agent, s.id) };
       p.sessions += 1;
       p.lastModified = Math.max(p.lastModified, s.updatedAt || 0);
+      p.recent.push(chat);
+      if (chat.pendingCount || chat.unread || chat.running) p.attention.push(chat);
       byDir.set(s.dir, p);
     }
+  }
+  for (const c of hub.live.values()) {
+    if (!c.running || c.sessionId || !byDir.has(c.dir)) continue;
+    const p = byDir.get(c.dir);
+    const chat = { agent: c.agent, id: null, key: c.key, dir: c.dir, title: '(starting…)',
+      updatedAt: Date.now(), running: true, pendingCount: c.pending.size, unread: false, tags: [] };
+    p.recent.push(chat);
+    p.attention.push(chat);
+    p.lastModified = Math.max(p.lastModified, chat.updatedAt);
+  }
+  for (const p of byDir.values()) {
+    p.recent.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    p.attention.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    p.recent = p.recent.slice(0, 3);
   }
   return [...byDir.values()].sort((a, b) => b.lastModified - a.lastModified || a.name.localeCompare(b.name));
 }
@@ -115,13 +137,14 @@ async function listConversations(dir) {
     }
     for (const s of sessions) {
       const key = `${b.id}:${s.id}`;
-      out.push({ ...s, agent: b.id, key, running: !!hub.get(key)?.running, unread: isUnread(b.id, s.id), tags: tagsOf(b.id, s.id) });
+      const live = hub.get(key);
+      out.push({ ...s, agent: b.id, key, dir, running: !!live?.running, pendingCount: live?.pending.size || 0, unread: isUnread(b.id, s.id), tags: tagsOf(b.id, s.id) });
     }
   }
   out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   // Brand-new conversations that haven't reported an id yet.
   for (const c of hub.starting(dir)) {
-    out.unshift({ agent: c.agent, id: null, key: c.key, title: '(starting…)', updatedAt: Date.now(), running: true, tags: [] });
+    out.unshift({ agent: c.agent, id: null, key: c.key, dir, title: '(starting…)', updatedAt: Date.now(), running: true, pendingCount: c.pending.size, tags: [] });
   }
   return out;
 }
