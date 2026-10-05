@@ -32,7 +32,10 @@ function detectHost() {
   if (process.env.HOST) return process.env.HOST;
   try {
     const ip = execFileSync('tailscale', ['ip', '-4'], { encoding: 'utf8' }).trim().split('\n')[0];
-    if (ip) return ip;
+    // With Tailscale stopped the CLI still prints the address, but no
+    // interface has it, and listening there would fail.
+    const up = Object.values(os.networkInterfaces()).flat().some((a) => a?.address === ip);
+    if (ip && up) return ip;
   } catch {}
   console.warn('Tailscale IP not found; listening on 127.0.0.1 only. Set HOST to override.');
   return '127.0.0.1';
