@@ -17,13 +17,15 @@ import { backends, availableBackends } from './lib/agents/index.mjs';
 import { tagsOf, setTags, quickTags, setQuickTags } from './lib/tags.mjs';
 import { isUnread, markRead } from './lib/reads.mjs';
 import { settingsOf, setSettings } from './lib/chat-settings.mjs';
+import { workspaceIndex, enabled as workspaceIndexEnabled } from './lib/workspace-index.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 7878);
 const PASSWORD = process.env.PASSWORD || '';
 const PROJECT_ROOTS = (process.env.PROJECT_ROOTS || path.join(os.homedir(), 'code'))
   .split(':')
-  .filter(Boolean);
+  .filter(Boolean)
+  .map((r) => path.resolve(r));
 
 function detectHost() {
   if (process.env.HOST) return process.env.HOST;
@@ -69,7 +71,8 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-const hub = new Hub();
+// Every conversation starts with a map of the projects (lib/workspace-index.mjs).
+const hub = new Hub({ instructions: () => workspaceIndex(listProjects, PROJECT_ROOTS) });
 
 // ---------- projects ----------
 
@@ -537,6 +540,7 @@ server.listen(PORT, HOST, () => {
   if (name) console.log(`Open from other devices: http://${name}:${PORT}  (or http://${name.split('.')[0]}:${PORT})`);
   console.log(PASSWORD ? 'Password protection: on' : 'Password protection: off (set PASSWORD to enable)');
   console.log(`Project roots: ${PROJECT_ROOTS.join(', ')}`);
+  console.log(`Workspace index for agents: ${workspaceIndexEnabled ? 'on' : 'off'}`);
   availableBackends().then((list) => console.log(`Agents: ${list.map((b) => b.label).join(', ')}`));
 });
 

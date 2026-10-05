@@ -104,6 +104,18 @@ sessions, so it resumes in a terminal too, and it starts with the model,
 effort, mode and tags of the chat it came from. The fork button is hidden
 while a turn is running, because the transcript is still being written.
 
+### Workspace index
+
+Every new conversation, with any agent, starts knowing which projects are
+on this machine: each folder under the project roots with its path, the
+opening paragraph of its README, when it was last active and the titles of
+its latest chats from all three agents. Ask about another repo by name and the
+agent knows where to look; reading outside the chat's folder still comes
+up as a permission prompt. Chat titles are often the start of a chat's
+first message, so whatever you typed there goes to the provider of every new
+chat. Set `WORKSPACE_INDEX=off` to turn it off — see
+[docs/REFERENCE.md](docs/REFERENCE.md#workspace-index).
+
 ### Sounds
 
 A soft two-note chime plays when a conversation finishes a turn, and a more

@@ -14,6 +14,7 @@ Detailed configuration and internals for agentdeck. Start with
 | `CODEX_BIN`     | newest of `codex` on `PATH` and the copies inside the ChatGPT / Codex apps | Codex binary to start. |
 | `OPENCODE_BIN`  | `opencode` on `PATH`, else `~/.opencode/bin/opencode` | opencode binary to start.            |
 | `OPENCODE_URL`  | none                        | Use an already running `opencode serve` instead of starting one (with `OPENCODE_SERVER_PASSWORD` if it has one). |
+| `WORKSPACE_INDEX` | on                        | `off` stops giving agents the [workspace index](#workspace-index). |
 
 ```bash
 PASSWORD='something-long' npm start
@@ -67,6 +68,53 @@ Forking is refused while a turn is running, because the transcript is still
 being written, and a conversation whose project folder no longer exists
 cannot be forked.
 
+## Workspace index
+
+When agentdeck starts a new conversation, it gives the agent a short map of
+the projects on this machine, built from what the sidebar knows:
+
+- every folder directly under `PROJECT_ROOTS`, most recently active first
+  (at most 60), with its path and the date of its last chat;
+- the first paragraph of its README, or `package.json`'s description,
+  clipped to 160 characters;
+- the titles of its three latest chats across Claude Code, Codex and
+  opencode, and up to six subfolders that have chats of their own.
+
+Chats in a subfolder count toward the top-level project. Worktrees and
+other dot-folders are left out of the subfolder list, and so are folders
+outside the project roots (scratch folders, the home directory). With 45
+projects the index is about 9 KB, roughly 2,000 tokens.
+
+How each agent receives it:
+
+- **Claude Code**: appended to its system prompt (`systemPrompt.append`).
+- **Codex**: as `developerInstructions` on `thread/start`, after any
+  `developer_instructions` in the Codex config (global or the project's),
+  which the parameter would otherwise replace.
+- **opencode**: as an instruction entry on the session
+  (`PUT /api/experimental/session/{id}/instructions/entries/workspace-index`).
+  opencode v2 does not read the config's `instructions` files. This API is
+  experimental; if it fails, the chat goes on without the index.
+
+Each agent records the index when the conversation is created and keeps it
+for the rest of the conversation: Claude Code saves its system prompt with
+the session, and Codex ignores developer instructions on resume. So a chat
+sees the projects as they were when it started and its prompt cache stays
+valid. Continuing an existing chat, including ones from before this feature
+or started in a terminal, adds nothing. Two exceptions on Claude Code: the
+recorded prompt is rebuilt when a conversation is compacted, and recording
+is still rolling out (and does nothing on Bedrock, Vertex or Foundry).
+agentdeck only keeps a chat's index in memory, so in those cases a chat
+continued after agentdeck restarts loses the index.
+
+Chat titles are often the start of a chat's first message (Claude Code and
+Codex fall back to it when a chat has no summary), so the index carries the
+opening words of chats from every project to the provider of each new chat,
+including whatever provider opencode is set up with. Set
+`WORKSPACE_INDEX=off` if that matters. The agent only knows where to look; reading
+a file outside the chat's folder still goes through the usual permission
+prompt.
+
 ## Images
 
 - Pictures a tool returns, such as Claude reading a PNG, a browser or
@@ -117,6 +165,7 @@ page wakes the sound up. A page that has only ever been scrolled stays silent.
   and the event stream every browser listens to. It doesn't depend on the
   agent.
 - `lib/items.mjs`: the agent-neutral transcript format the page renders.
+- `lib/workspace-index.mjs`: the project map given to agents.
 - `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,
   `opencode.mjs`). The interface they implement is described in
   `lib/agents/index.mjs`; adding an agent means adding a file there and
