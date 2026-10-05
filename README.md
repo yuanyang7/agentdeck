@@ -62,8 +62,9 @@ whichever agent's login is active.
 ### Tags
 
 Hover a conversation in the sidebar and click the tag button to add or
-remove tags (up to 10, 30 characters each). Tags you've used become **quick
-tags** you can toggle with one click. The **Tags** section at the top of the
+remove tags (up to 10, 30 characters each). Each change is saved as soon as
+you make it. Tags you've used become **quick tags** you can toggle with one
+click. The **Tags** section at the top of the
 sidebar has a chip for every tag; click one to list that tag's
 conversations from all workspaces. Tags live on the host and sync across every
 device, but are never written into the agents' own transcripts.

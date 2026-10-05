@@ -2,6 +2,12 @@
 
 ## Completed
 
+### 2026-10-05 — Tag changes save immediately
+
+- Final behavior: In the tag editor, removing a tag with its ×, toggling a quick tag or adding a typed one saves right away; the Cancel and Save buttons are replaced by a single Done. Before, these only changed a draft that Save sent, so closing the dialog with Cancel, Esc or a tap outside silently dropped a removal and the tag stayed on the chat. Saves are chained so quick successive changes land in order.
+- Verification: `node --check` on the app script; headless Chrome (desktop and iPhone 13 emulation) opened the `later` tag list, opened a chat's tag editor, removed the tag and closed the dialog with Esc: the chip count went from 3 to 2, the chat left the list, and `tags.json` no longer had it (restored afterwards).
+- Remaining limitations: There is no undo inside the dialog; re-adding the tag (it stays a quick tag) reverses a removal.
+
 ### 2026-10-05 — Forking a conversation
 
 - Final behavior: Every message you sent carries a fork control, shown on hover once the chat has a stored session and no turn is running. It branches the conversation: `POST /api/fork` has the agent copy it through the end of that exchange into a new session, which the browser then opens with a "Forked from …" line; forking from the last message copies the whole conversation. Branches are the agents' own sessions (Claude Code's `forkSession` with `upToMessageId`, Codex's `thread/fork` with `lastTurnId`, opencode's `POST /session/{id}/fork` with `before`), so they resume in a terminal too, and each one inherits the model, effort, mode and tags of the chat it came from. `fork?()` is a new optional method on the backend interface and `fork` a new flag in an agent's options.

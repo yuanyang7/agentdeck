@@ -155,7 +155,8 @@ function timeAgo(ms) {
   return new Date(ms).toLocaleDateString();
 }
 
-// Tag editor: `draft` is this chat's tags while the dialog is open; Save sends it.
+// Tag editor: `draft` is this chat's tags while the dialog is open. Every
+// change is saved at once, so closing the dialog any way keeps it.
 const tagEd = { session: null, draft: [], quick: [] };
 const hasTag = (list, t) => list.some((x) => x.toLowerCase() === t.toLowerCase());
 
@@ -169,6 +170,7 @@ function renderTagEditor() {
     chip.onclick = () => {
       tagEd.draft = tagEd.draft.filter((x) => x !== t);
       renderTagEditor();
+      saveTags();
     };
     cur.appendChild(chip);
   }
@@ -182,6 +184,7 @@ function renderTagEditor() {
       if (hasTag(tagEd.draft, t)) tagEd.draft = tagEd.draft.filter((x) => x.toLowerCase() !== t.toLowerCase());
       else tagEd.draft.push(t);
       renderTagEditor();
+      saveTags();
     };
     const forget = el('button', 'tag-forget', '×');
     forget.type = 'button';
@@ -200,8 +203,27 @@ function renderTagEditor() {
 function addDraftTag() {
   const t = $('tag-input').value.trim().replace(/\s+/g, ' ');
   $('tag-input').value = '';
-  if (t && !hasTag(tagEd.draft, t)) tagEd.draft.push(t);
+  if (!t || hasTag(tagEd.draft, t)) return;
+  tagEd.draft.push(t);
   renderTagEditor();
+  saveTags();
+}
+
+// Saves run one after another so a quick add-then-remove lands in order.
+let tagSaves = Promise.resolve();
+function saveTags() {
+  const s = tagEd.session;
+  const tags = [...tagEd.draft];
+  tagSaves = tagSaves.then(async () => {
+    try {
+      const r = await api('/api/tags', { agent: s.agent, sessionId: s.id, dir: s.dir, tags });
+      s.tags = r.tags;
+      renderSessions();
+      loadProjects();
+    } catch (err) {
+      alert('Could not save tags: ' + err.message);
+    }
+  });
 }
 
 async function editTags(s) {
@@ -225,21 +247,10 @@ $('tag-input').addEventListener('keydown', (e) => {
   }
 });
 
-$('tag-cancel').addEventListener('click', () => $('tag-dialog').close());
-
-$('tag-form').addEventListener('submit', async (e) => {
+$('tag-form').addEventListener('submit', (e) => {
   e.preventDefault();
   addDraftTag(); // whatever is still in the input counts
-  const s = tagEd.session;
-  try {
-    const r = await api('/api/tags', { agent: s.agent, sessionId: s.id, dir: s.dir, tags: tagEd.draft });
-    s.tags = r.tags;
-    $('tag-dialog').close();
-    renderSessions();
-    loadProjects();
-  } catch (err) {
-    alert('Could not save tags: ' + err.message);
-  }
+  $('tag-dialog').close();
 });
 
 // A chip for every tag in use, counted across all workspaces. Picking one
