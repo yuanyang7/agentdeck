@@ -15,6 +15,7 @@ const ui = {
   sessions: [],
   projects: [],
   expandedWorkspace: null,
+  shownCount: 0, // chats listed in the expanded workspace; grows by SHOW_MORE_STEP
   tagFilter: null, // tag the chat list is filtered to, or null
   agents: [], // [{ id, label }] available on the host
   options: new Map(), // agent -> composer options from the server
@@ -253,11 +254,21 @@ function renderTagFilter(box) {
     chip.type = 'button';
     chip.onclick = () => {
       ui.tagFilter = ui.tagFilter === t ? null : t;
-      ui.expandedWorkspace = ui.dir;
+      expandWorkspace(ui.dir);
       renderSessions();
     };
     box.appendChild(chip);
   }
+}
+
+// The sidebar lists a workspace's RECENT_COUNT newest chats (the server's
+// `recent`); each "Show more" reveals SHOW_MORE_STEP more of them.
+const RECENT_COUNT = 3;
+const SHOW_MORE_STEP = 5;
+
+function expandWorkspace(dir) {
+  if (ui.expandedWorkspace !== dir) ui.shownCount = RECENT_COUNT + SHOW_MORE_STEP;
+  ui.expandedWorkspace = dir;
 }
 
 function renderSessions() {
@@ -295,40 +306,49 @@ function renderSessions() {
         newConversation();
         await loadSessions();
       }
-      ui.expandedWorkspace = ui.expandedWorkspace === p.dir ? null : p.dir;
+      if (ui.expandedWorkspace === p.dir) ui.expandedWorkspace = null;
+      else expandWorkspace(p.dir);
       renderSessions();
     };
     section.appendChild(head);
     const expanded = ui.expandedWorkspace === p.dir && ui.dir === p.dir;
-    const rows = expanded ? ui.sessions : [...p.recent];
-    const active = p.dir === ui.dir && ui.sessions.find((s) => s.key === ui.key);
-    if (!expanded && active && !rows.some((s) => s.key === active.key)) rows.push(active);
     if (expanded) {
       const filter = el('div', 'tag-filter');
       renderTagFilter(filter);
       section.appendChild(filter);
     }
+    const matching = expanded
+      ? ui.sessions.filter((s) => !ui.tagFilter || (s.tags || []).includes(ui.tagFilter))
+      : p.recent;
+    const rows = expanded ? matching.slice(0, ui.shownCount) : [...p.recent];
+    const total = expanded ? matching.length : p.sessions;
+    const active = p.dir === ui.dir && ui.sessions.find((s) => s.key === ui.key);
+    if (active && !rows.some((s) => s.key === active.key) && (!expanded || matching.includes(active))) rows.push(active);
     const list = el('ul', 'sessions');
-    for (const s of rows) {
-      if (expanded && ui.tagFilter && !(s.tags || []).includes(ui.tagFilter)) continue;
-      list.appendChild(sessionRow(s));
-    }
+    for (const s of rows) list.appendChild(sessionRow(s));
     section.appendChild(list);
-    if (!expanded && p.sessions > p.recent.length) {
-      const more = el('button', 'workspace-more', `Show all ${p.sessions} conversations`);
+    const remaining = total - rows.length;
+    const buttons = el('div', 'workspace-more-row');
+    if (remaining > 0) {
+      const more = el('button', 'workspace-more', remaining > SHOW_MORE_STEP
+        ? `Show ${SHOW_MORE_STEP} more · ${remaining} left`
+        : `Show ${remaining} more`);
       more.type = 'button';
       more.onclick = async () => {
         if (ui.dir !== p.dir) { setProject(p.dir); newConversation(); await loadSessions(); }
-        ui.expandedWorkspace = p.dir;
+        if (expanded) ui.shownCount += SHOW_MORE_STEP;
+        else expandWorkspace(p.dir);
         renderSessions();
       };
-      section.appendChild(more);
-    } else if (expanded && p.sessions > 3) {
+      buttons.appendChild(more);
+    }
+    if (expanded && p.sessions > RECENT_COUNT) {
       const less = el('button', 'workspace-more', 'Show recent only');
       less.type = 'button';
       less.onclick = () => { ui.expandedWorkspace = null; renderSessions(); };
-      section.appendChild(less);
+      buttons.appendChild(less);
     }
+    if (buttons.childElementCount) section.appendChild(buttons);
     workspaces.appendChild(section);
   }
 }
