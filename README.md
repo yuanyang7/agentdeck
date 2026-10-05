@@ -56,7 +56,8 @@ chooses the agent for a new conversation; an existing conversation always
 continues with the agent it started with. The mode, model and effort menus
 adapt to show what the selected agent offers — see
 [docs/REFERENCE.md](docs/REFERENCE.md#agent-modes) for what each agent's
-modes mean.
+modes mean. The **Usage** button in the header shows the plan limits of
+whichever agent's login is active.
 
 ### Tags
 
