@@ -70,7 +70,10 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 .login input, .login button { min-height: 46px; padding: 10px 14px; }
 .login code, .tag-dialog code { white-space: nowrap; font-size: 12px; background: var(--code-bg); padding: 1px 5px; border-radius: 5px; }
 .pair-code { font: 700 30px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; text-align: center; padding: 12px; border-radius: 14px; background: var(--code-bg); }
-.perm .pair-code { display: inline-block; margin-top: 10px; padding: 6px 12px; font-size: 22px; }
+.device-code { width: 7.5em; padding: 8px 10px; font: 600 16px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.device-code::placeholder { letter-spacing: 0; text-transform: none; }
+.device-card .error { margin-top: 8px; }
+.device-card .error:empty { display: none; }
 .login .pair-hint { font-size: 12px; margin-top: 4px; }
 .pair-password { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 

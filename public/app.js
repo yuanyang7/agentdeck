@@ -91,7 +91,7 @@ function renderPairing(s) {
   if (s.status === 'approved') return location.reload();
   const waiting = s.status === 'waiting';
   $('pair-status').textContent = waiting
-    ? 'On a device that already uses agentdeck, approve the request showing this code:'
+    ? 'To let this device in, type this code on a device that already uses agentdeck:'
     : s.status === 'denied' ? 'This device was denied.'
     : s.status === 'removed' ? 'This device was removed from agentdeck.'
     : 'The request expired.';
@@ -1929,12 +1929,12 @@ $('toggle-usage').addEventListener('click', () => {
 // Browsers waiting for approval show up as cards on every approved device,
 // and the Devices dialog lists the approved ones.
 let deviceState = { devices: [], waiting: [], current: null };
-const heardCodes = new Set();
+const heardRequests = new Set();
 
 async function loadDevices() {
   deviceState = await api('/api/devices');
-  const fresh = deviceState.waiting.filter((r) => !heardCodes.has(r.code));
-  for (const r of fresh) heardCodes.add(r.code);
+  const fresh = deviceState.waiting.filter((r) => !heardRequests.has(r.id));
+  for (const r of fresh) heardRequests.add(r.id);
   if (fresh.length) {
     playChime('ask');
     announcePending(`${fresh.length === 1 ? 'A new device is' : `${fresh.length} new devices are`} waiting for approval.`);
@@ -1952,26 +1952,53 @@ async function deviceAction(path, body) {
   loadDevices().catch(() => {});
 }
 
+// Cards are kept across refreshes, so a code half typed into one survives
+// another device arriving.
 function renderDeviceRequests() {
   const box = $('device-requests');
-  box.innerHTML = '';
-  for (const r of deviceState.waiting) {
-    const card = el('div', 'perm');
-    card.setAttribute('role', 'group');
-    card.setAttribute('aria-label', 'New device');
-    card.appendChild(el('div', 'perm-kicker', 'NEW DEVICE'));
-    card.appendChild(el('h4', '', `${r.name}${r.machine ? ' · ' + r.machine : ''} wants to use agentdeck`));
-    card.appendChild(el('div', 'muted', 'Approve it only if this code is showing on the device you are adding:'));
-    card.appendChild(el('div', 'pair-code', dashed(r.code)));
-    const row = el('div', 'row');
-    const allow = el('button', 'primary', 'Approve');
-    allow.onclick = () => deviceAction('/api/devices/approve', { code: r.code });
-    const deny = el('button', 'danger', 'Deny');
-    deny.onclick = () => deviceAction('/api/devices/deny', { code: r.code });
-    row.append(allow, deny);
-    card.appendChild(row);
-    box.appendChild(card);
-  }
+  const existing = new Map([...box.children].map((card) => [card.requestId, card]));
+  const cards = deviceState.waiting.map((r) => existing.get(r.id) || makeDeviceCard(r));
+  for (const card of [...box.children]) if (!cards.includes(card)) card.remove();
+  cards.forEach((card, i) => {
+    if (box.children[i] !== card) box.insertBefore(card, box.children[i] || null);
+  });
+}
+
+// The card doesn't show the code: only the device asking does, so approving
+// means reading it off that device. A request nobody is looking at can't be
+// approved by tapping through.
+function makeDeviceCard(r) {
+  const card = el('form', 'perm device-card');
+  card.requestId = r.id;
+  card.setAttribute('aria-label', 'New device');
+  card.appendChild(el('div', 'perm-kicker', 'NEW DEVICE'));
+  card.appendChild(el('h4', '', `${r.name}${r.machine ? ' · ' + r.machine : ''} wants to use agentdeck`));
+  card.appendChild(el('div', 'muted', 'If you are adding it, type the code it shows:'));
+  const row = el('div', 'row');
+  const input = el('input', 'device-code');
+  Object.assign(input, { type: 'text', placeholder: 'Code', autocomplete: 'off', spellcheck: false, maxLength: 7 });
+  input.setAttribute('autocapitalize', 'characters');
+  input.setAttribute('aria-label', `Code shown on ${r.name}`);
+  const allow = el('button', 'primary', 'Approve');
+  allow.type = 'submit';
+  const deny = el('button', 'danger', 'Deny');
+  deny.type = 'button';
+  deny.onclick = () => deviceAction('/api/devices/deny', { id: r.id });
+  row.append(input, allow, deny);
+  const error = el('div', 'error');
+  card.append(row, error);
+  card.onsubmit = async (e) => {
+    e.preventDefault();
+    error.textContent = '';
+    try {
+      await api('/api/devices/approve', { id: r.id, code: input.value });
+      loadDevices().catch(() => {});
+    } catch (err) {
+      error.textContent = err.message;
+      input.select();
+    }
+  };
+  return card;
 }
 
 function renderDevices() {

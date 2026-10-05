@@ -8,7 +8,7 @@ Detailed configuration and internals for agentdeck. Start with
 | Variable        | Default                     | Meaning                                                      |
 | --------------- | ---------------------------- | ------------------------------------------------------------ |
 | `PASSWORD`      | none                        | A password that approves a browser, besides approval from another [device](#devices). |
-| `ALLOWED_HOSTS` | none                        | `,`-separated extra host names the page may be opened under (see [Devices](#devices)). |
+| `ALLOWED_HOSTS` | none                        | `,`-separated extra host names the page may be opened under, besides IP addresses, `localhost` and the MagicDNS name (see [Devices](#devices)). |
 | `PORT`          | `7878`                      | Port to listen on.                                           |
 | `HOST`          | Tailscale IP, else 127.0.0.1 | Address to bind.                                            |
 | `PROJECT_ROOTS` | `~/code`                    | `:`-separated folders whose subfolders appear as projects.   |
@@ -27,18 +27,21 @@ Each browser has to be approved once before it can use agentdeck:
 
 1. A browser the host doesn't know gets a random device key in a cookie and
    shows a six-character code, such as `K7Q-4MD`.
-2. Every approved device shows a **New device** card with the same code, the
-   browser's kind (*Safari on iPhone*) and the tailnet machine it comes from,
-   as Tailscale names it. Approve it only if the code matches the screen of
-   the device you are adding. **Deny** shows that device a denial and an
-   **Ask again** button, which starts over with a new code.
+2. Every approved device shows a **New device** card with the browser's kind
+   (*Safari on iPhone*) and the tailnet machine it comes from, as Tailscale
+   names it. The card doesn't show the code: type the code from the new
+   device's screen and press **Approve**. Only the waiting browser is ever
+   shown its code, so a request you can't see, made by someone else, can't
+   be approved by tapping through. A wrong code is refused and the request
+   keeps waiting. **Deny** shows that device a denial and an **Ask again**
+   button, which starts over with a new code.
 3. Once approved, the waiting page opens agentdeck by itself.
 
 The first device has no one to approve it, so approve it from a terminal on
 the host:
 
 ```bash
-npm run approve              # lists waiting devices; offers to approve if there is one
+npm run approve              # lists waiting devices and asks for the code
 npm run approve -- K7Q-4MD   # approves the device showing that code
 ```
 
@@ -67,10 +70,12 @@ of request that a web page could make through your own browser:
   the same host (a dev server on `localhost:3000`, say), can't call the API.
   Browsers mark such requests with `Sec-Fetch-Site` (or `Origin`).
 - **DNS rebinding.** A site could point its own domain at this machine to
-  get past the browser's same-origin rule. Only these names are accepted: IP
-  addresses, names without a dot (`localhost`, MagicDNS short names), names
-  under `.ts.net` (MagicDNS, `tailscale serve`) and `.local`. If you reach
-  agentdeck under another name, add it to `ALLOWED_HOSTS`.
+  get past the browser's same-origin rule. Only this machine's own names are
+  accepted: IP addresses, `localhost`, and its MagicDNS name, both full (as
+  `tailscale serve` uses it) and short. If Tailscale wasn't up when agentdeck
+  started, the name is looked up again, at most once a minute, the first
+  time a request uses it. If you reach agentdeck under any other name, such
+  as a `.local` name on your LAN, add it to `ALLOWED_HOSTS`.
 
 ## Agent modes
 

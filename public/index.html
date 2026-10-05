@@ -16,7 +16,7 @@
       <h1>Approve this device</h1>
       <p id="pair-status" class="muted" role="status">Asking the host…</p>
       <div id="pair-code" class="pair-code hidden" aria-label="Approval code"></div>
-      <p id="pair-hint" class="muted pair-hint hidden">No device approved yet? Run <code>npm run approve</code> in agentdeck's folder on the host.</p>
+      <p id="pair-hint" class="muted pair-hint hidden">No device approved yet? Run <code>npm run approve</code> in agentdeck's folder on the host and type the code there.</p>
       <button type="button" id="pair-again" class="hidden">Ask again</button>
       <div id="pair-password" class="pair-password hidden">
         <input id="password" type="password" placeholder="Or enter the password" autocomplete="current-password" aria-label="Password">
@@ -124,7 +124,7 @@
   <dialog id="device-dialog" class="tag-dialog">
     <form method="dialog" id="device-form">
       <h2>Devices</h2>
-      <p class="muted folder-hint">Browsers that can use agentdeck. A new one shows a code and waits until an approved device or <code>npm run approve</code> on the host lets it in.</p>
+      <p class="muted folder-hint">Browsers that can use agentdeck. A new one shows a code and waits until someone types it here on an approved device, or in <code>npm run approve</code> on the host.</p>
       <div id="device-list" class="folder-list"></div>
       <div class="tag-actions">
         <button type="submit" class="primary">Done</button>

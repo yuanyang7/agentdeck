@@ -38,7 +38,8 @@ to open from other devices; prefer the MagicDNS name it prints
 itself.
 
 The first time you open it, the page shows a code and waits for approval.
-Run `npm run approve` in this folder on the host to let that browser in.
+Run `npm run approve` in this folder on the host and type that code to let
+the browser in.
 After that, a new device can be approved from one you already use (see
 [Security](#security)).
 
@@ -50,8 +51,10 @@ variables — see [docs/REFERENCE.md](docs/REFERENCE.md#environment-variables).
 Anyone who can use this page can run commands on the host through the
 agents, so each browser has to be approved once. A new browser shows a
 short code and waits. Every device that already uses agentdeck gets a prompt
-with the same code: approve it there if it matches the screen you're holding.
-For the very first device, run `npm run approve` on the host. Approvals are
+asking for that code; typing it there lets the new browser in. The code is
+only ever shown on the new browser, so nobody can get approved by a tap on a
+prompt you didn't expect. For the very first device, run `npm run approve` on
+the host and type the code there. Approvals are
 kept on the host, so restarts don't sign anyone out. **Devices**, at the
 bottom of the sidebar, lists them and removes any you no longer use. If a
 `PASSWORD` is set, typing it also approves a browser.

@@ -1,8 +1,9 @@
 // Approves a browser that is waiting to use agentdeck, from a terminal on the
 // host. This is how the first device gets in; after that, any approved device
-// can approve the next one.
+// can approve the next one. Either way you type the code the new browser
+// shows, which nothing else displays.
 //
-//   npm run approve              lists waiting devices and offers the only one
+//   npm run approve              lists waiting devices and asks for the code
 //   npm run approve -- K7Q-4MD   approves the device showing that code
 
 import readline from 'node:readline/promises';
@@ -23,7 +24,6 @@ async function api(path, body) {
   return data;
 }
 
-const dashed = (code) => `${code.slice(0, 3)}-${code.slice(3)}`;
 const ago = (ms) => {
   const m = Math.floor((Date.now() - ms) / 60_000);
   return m < 1 ? 'just now' : `${m} min ago`;
@@ -36,7 +36,7 @@ async function approve(code) {
 }
 
 async function main() {
-  const asked = process.argv[2];
+  const typed = process.argv[2];
   let waiting;
   try {
     ({ waiting } = await api('/api/devices'));
@@ -48,23 +48,21 @@ async function main() {
     }
     process.exit(1);
   }
-  if (asked) return approve(asked);
+  if (typed) return approve(typed);
   if (!waiting.length) {
     console.log('No device is waiting. Open agentdeck in the browser you want to approve; it shows a code. Then run this again.');
     return;
   }
   console.log('Waiting for approval:');
-  for (const r of waiting) console.log(`  ${dashed(r.code)}  ${describe(r)} · ${ago(r.at)}`);
-  if (waiting.length > 1 || !process.stdin.isTTY) {
-    console.log('\nApprove one with: npm run approve -- <code>');
+  for (const r of waiting) console.log(`  ${describe(r)} · ${ago(r.at)}`);
+  if (!process.stdin.isTTY) {
+    console.log('\nApprove one with: npm run approve -- <the code it shows>');
     return;
   }
-  const [r] = waiting;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await rl.question(`\nApprove ${describe(r)} showing ${dashed(r.code)}? [y/N] `).catch(() => ''); // Ctrl+D: no
-  const yes = /^y(es)?$/i.test(answer.trim());
+  const code = await rl.question('\nType the code shown on the device to approve it (Enter to cancel): ').catch(() => ''); // Ctrl+D: cancel
   rl.close();
-  if (yes) await approve(r.code);
+  if (code.trim()) await approve(code);
   else console.log('Not approved.');
 }
 

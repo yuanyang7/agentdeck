@@ -103,15 +103,30 @@ function crossSite(req) {
 }
 
 // DNS rebinding: a site can point its own name at this machine to get around
-// the same-origin rule, and then the Host header carries that name. Accept
-// IP addresses, names without a dot (localhost, MagicDNS short names), names
-// under .ts.net and .local, and ALLOWED_HOSTS.
-const ALLOWED_HOSTS = new Set((process.env.ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean));
+// the same-origin rule, and then the Host header carries that name. So only
+// this machine's own names are accepted: IP addresses, localhost, its
+// MagicDNS name (full, as `tailscale serve` uses it, and short) and
+// ALLOWED_HOSTS.
+const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+
+function ownNames() {
+  const names = new Set(['localhost', ...ALLOWED_HOSTS]);
+  const magic = magicDnsName()?.toLowerCase();
+  if (magic) names.add(magic).add(magic.split('.')[0]);
+  return names;
+}
+
+let hostNames = ownNames();
+let hostNamesAt = Date.now();
 
 function knownHost(req) {
   const host = (req.headers.host || '').toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
-  if (!host || net.isIP(host.replace(/^\[|\]$/g, ''))) return true;
-  return !host.includes('.') || /\.(ts\.net|local)$/.test(host) || ALLOWED_HOSTS.has(host);
+  if (!host || net.isIP(host.replace(/^\[|\]$/g, '')) || hostNames.has(host)) return true;
+  // Tailscale may have come up, or the machine been renamed, since the last look.
+  if (Date.now() - hostNamesAt < 60_000) return false;
+  hostNames = ownNames();
+  hostNamesAt = Date.now();
+  return hostNames.has(host);
 }
 
 // Wrong passwords per address, to slow down guessing.
@@ -430,16 +445,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/devices/approve' && req.method === 'POST') {
-      const { code } = await readJson(req);
-      const approved = devices.approve(code);
-      if (!approved) return send(res, 404, { error: 'No device is waiting with that code.' });
+      // `code` is what the approver typed from the new device's screen; the
+      // API never hands it out. `id` is the request it was typed for, if any.
+      const { code, id } = await readJson(req);
+      const approved = devices.approve(code, typeof id === 'string' ? id : undefined);
+      if (approved.error) return send(res, 400, { error: approved.error });
       hub.broadcast({ type: 'devices_changed' });
-      return send(res, 200, { device: approved });
+      return send(res, 200, { device: approved.device });
     }
 
     if (p === '/api/devices/deny' && req.method === 'POST') {
-      const { code } = await readJson(req);
-      if (!devices.deny(code)) return send(res, 404, { error: 'No device is waiting with that code.' });
+      const { id } = await readJson(req);
+      if (!devices.deny(id)) return send(res, 404, { error: 'This device is no longer waiting.' });
       hub.broadcast({ type: 'devices_changed' });
       return send(res, 200, { ok: true });
     }
