@@ -11,6 +11,7 @@ const ui = {
   mode: null, // mode reported by the live conversation, if any
   settings: null, // { model, effort, mode } the open chat uses, as stored on the server
   pending: [],
+  queue: [], // messages waiting for the running turn: [{ id, text, images (count) }]
   sessions: [],
   projects: [],
   expandedWorkspace: null,
@@ -436,9 +437,11 @@ function resetView() {
   ui.imagePaths.clear();
   ui.mode = null;
   ui.pending = [];
+  ui.queue = [];
   clearTimeout(pendingAnnouncementTimer);
   $('announcement').textContent = '';
   renderPending();
+  renderQueue();
 }
 
 function newConversation() {
@@ -761,6 +764,8 @@ function applyStatus(st) {
     announcePending(`${changes.join(' ')} ${next.length ? `${next.length} pending. Use Review to open.` : 'No requests pending.'}`);
   }
   ui.pending = next;
+  ui.queue = st.queue || [];
+  renderQueue();
   setRunning(st.running);
   ui.mode = st.mode || null;
   if (st.mode && [...$('mode').options].some((o) => o.value === st.mode)) $('mode').value = st.mode;
@@ -777,7 +782,10 @@ function announcePending(message) {
 function setRunning(running) {
   ui.running = running;
   $('stop').classList.toggle('hidden', !running);
-  $('send').disabled = running;
+  // While a turn runs, sending queues the message for after it.
+  $('send').firstChild.textContent = running ? 'Queue ' : 'Send ';
+  $('send').title = running ? 'Runs after the current turn finishes' : '';
+  $('input').placeholder = `${running ? 'Queue a message for' : 'Message'} ${agentLabel(ui.agent)}…`;
   $('status').classList.remove('status-error');
   $('status').removeAttribute('role');
   $('status').innerHTML = '';
@@ -964,6 +972,56 @@ async function answer(p, body) {
   } catch (err) {
     alert(err.message);
   }
+}
+
+// ---------- queued messages ----------
+
+// Messages sent while the agent works. They are kept on the server, so every
+// device sees the same queue; each runs as its own turn once the one before
+// it finishes.
+function renderQueue() {
+  const box = $('queue');
+  box.innerHTML = '';
+  if (!ui.queue.length) return;
+  box.appendChild(el('div', 'queue-head', `QUEUED · ${ui.queue.length}`));
+  for (const m of ui.queue) {
+    const row = el('div', 'queued');
+    row.appendChild(el('div', 'queued-text', m.text || '(image)'));
+    if (m.images) row.appendChild(el('span', 'queued-images', `+${m.images} image${m.images === 1 ? '' : 's'}`));
+    const edit = el('button', '', 'Edit');
+    edit.type = 'button';
+    edit.title = 'Take it out of the queue and back into the message box';
+    edit.onclick = () => unqueue(m, true);
+    const remove = el('button', '', '×');
+    remove.type = 'button';
+    remove.title = 'Remove from the queue';
+    remove.setAttribute('aria-label', 'Remove from the queue');
+    remove.onclick = () => unqueue(m, false);
+    row.append(edit, remove);
+    box.appendChild(row);
+  }
+}
+
+async function unqueue(m, edit) {
+  try {
+    const message = await api('/api/unqueue', { key: ui.key, id: m.id });
+    if (edit) restoreToComposer([message]);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+// Puts messages taken out of the queue back into the composer, after
+// whatever is already typed there.
+function restoreToComposer(messages) {
+  const texts = messages.map((m) => m.text).filter(Boolean);
+  if (texts.length) input.value = [input.value.trim(), ...texts].filter(Boolean).join('\n\n');
+  for (const m of messages) {
+    for (const img of m.images || []) if (attachments.length < MAX_ATTACH) attachments.push(img);
+  }
+  renderAttachments();
+  autosize();
+  input.focus();
 }
 
 // ---------- agent & options ----------
@@ -1222,7 +1280,7 @@ $('composer').addEventListener('drop', (e) => {
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = input.value.trim();
-  if ((!text && !attachments.length) || ui.running || !ui.dir) return;
+  if ((!text && !attachments.length) || !ui.dir || $('send').disabled) return;
   $('send').disabled = true;
   const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
   const isNew = !ui.key;
@@ -1237,7 +1295,8 @@ $('composer').addEventListener('submit', async (e) => {
     await api('/api/send', {
       agent: ui.agent,
       sessionId: ui.sessionId,
-      key: isNew ? ui.key : undefined,
+      // A new chat whose first turn is still starting is found by its temp key.
+      key: ui.key.startsWith('new-') ? ui.key : undefined,
       dir: ui.dir,
       text,
       images,
@@ -1257,11 +1316,18 @@ $('composer').addEventListener('submit', async (e) => {
       $('agent').disabled = false;
     }
     alert(err.message);
+  } finally {
     $('send').disabled = false;
   }
 });
 
-$('stop').addEventListener('click', () => api('/api/interrupt', { key: ui.key }).catch(() => {}));
+// Stopping also clears the queue; its messages come back into the composer.
+$('stop').addEventListener('click', async () => {
+  try {
+    const r = await api('/api/interrupt', { key: ui.key });
+    if (r.dropped?.length) restoreToComposer(r.dropped);
+  } catch {}
+});
 
 $('mode').addEventListener('change', () => {
   // The live conversation, if any, switches right away.

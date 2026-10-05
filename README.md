@@ -78,8 +78,12 @@ mentions are matched.
 
 ### Turns
 
-One conversation runs one turn at a time: sending from another device is
-refused until the turn finishes or someone presses **Stop**. Permission
+One conversation runs one turn at a time. Messages sent while the agent is
+working — from any device — wait in a queue shown above the composer and run
+in order as each turn finishes. A queued message can be edited (taken back
+into the message box) or removed before it starts. **Stop** ends the current
+turn and clears the queue, putting the queued messages back into the message
+box of the device that pressed it. Permission
 prompts (file edits, shell commands, plan approval, questions) appear on
 every connected device, and whichever answers first wins. Avoid keeping the
 same conversation open here and in a terminal, desktop app, or opencode TUI

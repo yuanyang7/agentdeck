@@ -353,6 +353,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: 'Bad session' });
       }
       if (key != null && (typeof key !== 'string' || !/^new-[\w-]{1,64}$/.test(key))) return send(res, 400, { error: 'Bad key' });
+      // Sent while a turn runs, the message waits in the chat's queue.
       const opts = await backend.options();
       const settings = { mode: mode || opts.defaultMode, model, effort };
       if (!opts.modes.some((x) => x.value === settings.mode)) return send(res, 400, { error: 'Bad mode' });
@@ -377,9 +378,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/interrupt' && req.method === 'POST') {
+      // Also drops the chat's queue; the dropped messages come back so the
+      // browser can restore them to its composer.
       const { key } = await readJson(req);
-      await hub.interrupt(key);
-      return send(res, 200, { ok: true });
+      const dropped = await hub.interrupt(key);
+      return send(res, 200, { ok: true, dropped: dropped.map(({ text, images }) => ({ text, images })) });
+    }
+
+    if (p === '/api/unqueue' && req.method === 'POST') {
+      const { key, id } = await readJson(req);
+      const message = hub.unqueue(key, id);
+      if (!message) return send(res, 404, { error: 'That message already started.' });
+      return send(res, 200, { text: message.text, images: message.images });
     }
 
     if (p === '/api/mode' && req.method === 'POST') {

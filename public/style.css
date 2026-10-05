@@ -193,6 +193,13 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .perm .q .desc { display: block; font-size: 12px; color: var(--muted); }
 
 /* Composer */
+.queue { padding: 0 max(28px, calc((100% - 880px) / 2)); max-height: 30%; overflow-y: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.queue:empty { display: none; }
+.queue-head { align-self: stretch; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .12em; padding-top: 8px; }
+.queued { display: flex; align-items: flex-start; gap: 8px; max-width: min(80%, 680px); padding: 8px 8px 8px 14px; border: 1px dashed color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--user) 55%, transparent); }
+.queued-text { flex: 1; min-width: 0; white-space: pre-wrap; word-wrap: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); }
+.queued-images { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.queued button { flex: none; min-height: 26px; padding: 2px 9px; font-size: 11px; }
 .composer { padding: 12px max(28px, calc((100% - 880px) / 2)) calc(18px + env(safe-area-inset-bottom)); background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 72%, transparent), var(--bg) 30%); display: flex; flex-direction: column; gap: 0; }
 .composer textarea { width: 100%; min-height: 76px; max-height: 40vh; resize: none; padding: 16px 17px; background: var(--card); border: 1px solid var(--border); border-bottom: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -5px 20px rgba(24, 34, 70, .035); outline: none; }
 .composer textarea::placeholder { color: var(--muted); }
@@ -260,7 +267,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   .empty { padding-bottom: 50px; }
   .empty-mark { width: 56px; height: 56px; }
   .msg-user { max-width: 90%; }
-  .pending, .usage { padding-left: 14px; padding-right: 14px; }
+  .pending, .queue, .usage { padding-left: 14px; padding-right: 14px; }
+  .queued { max-width: 94%; }
   .composer { padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); }
   .composer textarea { font-size: 16px; min-height: 69px; padding: 12px 13px; }
   .composer-row { flex-wrap: wrap; gap: 4px; padding: 4px 7px 7px; }
