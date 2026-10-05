@@ -166,6 +166,24 @@ running in another workspace still calls out. The bell button in the header
 mutes them, per device. Browsers only allow sound after you've interacted
 with the page, so the first click or key press after opening arms it.
 
+### Quick actions
+
+The header ends with one-click buttons that run on the host. **Restart** is
+built in: it restarts agentdeck itself, which is how to pick up a change an
+agent just made to agentdeck's own code without going to a terminal. Every
+open page shows "Restarting…" and reloads when the server is back; a message
+you were typing comes back with it. If any conversation is mid-turn, the
+button asks first, because a restart stops those turns.
+
+**Settings**, at the bottom of the sidebar, adds your own buttons (macros):
+a label, an optional emoji, and a shell command that runs on the host in the
+open workspace's folder. Each one shows what it printed in a card above the
+composer, and can restart agentdeck once it succeeds, for an "update and
+restart" button. The list is kept on the host, so every device shows the
+same buttons; on a phone, Restart stays in the header and ⚡ opens the rest.
+See [docs/REFERENCE.md](docs/REFERENCE.md#quick-actions) for how the
+restart works under a LaunchAgent or when started by hand.
+
 ## More
 
 [docs/REFERENCE.md](docs/REFERENCE.md) covers:

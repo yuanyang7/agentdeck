@@ -11,7 +11,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import net from 'node:net';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { Hub, BusyError } from './lib/hub.mjs';
@@ -22,8 +22,10 @@ import { settingsOf, setSettings } from './lib/chat-settings.mjs';
 import { workspaceIndex, enabled as workspaceIndexEnabled } from './lib/workspace-index.mjs';
 import { rootFolders, checkFolders, mentionedFolders } from './lib/folders.mjs';
 import * as devices from './lib/devices.mjs';
+import * as actions from './lib/actions.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const STARTED = Date.now(); // pages compare this to tell a restarted server from the old one
 const PORT = Number(process.env.PORT || 7878);
 const PASSWORD = process.env.PASSWORD || '';
 const PROJECT_ROOTS = (process.env.PROJECT_ROOTS || path.join(os.homedir(), 'code'))
@@ -171,6 +173,82 @@ const hub = new Hub({
   instructions: () => workspaceIndex(listProjects, PROJECT_ROOTS),
   mentions: (text, dir, dirs) => mentionedFolders(text, rootFolders(PROJECT_ROOTS), dir, dirs),
 });
+
+// ---------- quick actions ----------
+
+// Under launchd, systemd or pm2 the supervisor starts agentdeck again as soon
+// as it exits. Started by hand (`npm start`), it starts itself again: a shell
+// waits for this process to end, which frees the port, then runs the same
+// command in the same folder with the same environment. launchd is asked
+// rather than read from the environment, because everything an agent runs
+// inside agentdeck inherits that environment, including a test server.
+function supervised() {
+  if (process.env.AGENTDECK_SUPERVISED) return process.env.AGENTDECK_SUPERVISED !== '0';
+  if (process.platform === 'darwin') {
+    try {
+      return execFileSync('launchctl', ['list'], { encoding: 'utf8' }).split('\n').some((l) => l.startsWith(`${process.pid}\t`));
+    } catch {
+      return false;
+    }
+  }
+  return (process.ppid === 1 && !!process.env.INVOCATION_ID) || !!process.env.pm_id;
+}
+const SUPERVISED = supervised();
+
+function restart() {
+  console.log(`Restarting${SUPERVISED ? ' (the supervisor starts agentdeck again)' : ''}…`);
+  hub.broadcast({ type: 'restarting' });
+  // Let the event reach every page before the streams close.
+  setTimeout(() => {
+    if (!SUPERVISED) {
+      const wait = `while kill -0 ${process.pid} 2>/dev/null; do sleep 0.2; done; exec "$@"`;
+      spawn('/bin/sh', ['-c', wait, 'sh', process.execPath, ...process.execArgv, ...process.argv.slice(1)], {
+        cwd: process.cwd(), env: process.env, detached: true, stdio: 'inherit',
+      }).unref();
+    }
+    process.exit(0);
+  }, 300);
+}
+
+const ACTION_TIMEOUT = 60_000;
+const MAX_OUTPUT = 100_000;
+
+// Runs a custom action's command in `cwd` through the user's shell and
+// collects what it prints: { code, output, timedOut, ms }.
+function runCommand(command, cwd) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    let output = '';
+    let truncated = false;
+    let timedOut = false;
+    const child = spawn(process.env.SHELL || '/bin/sh', ['-c', command], {
+      cwd,
+      env: { ...process.env, AGENTDECK_DIR: ROOT, AGENTDECK_PORT: String(PORT) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true, // its own process group, so a timeout kills what it started too
+    });
+    const take = (chunk) => {
+      if (output.length < MAX_OUTPUT) output += chunk;
+      else truncated = true;
+    };
+    child.stdout.setEncoding('utf8').on('data', take);
+    child.stderr.setEncoding('utf8').on('data', take);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    }, ACTION_TIMEOUT);
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ code: 127, output: err.message, timedOut: false, ms: Date.now() - started });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code: code ?? 1, output: output.trimEnd() + (truncated ? '\n…' : ''), timedOut, ms: Date.now() - started });
+    });
+  });
+}
+
+const runningTurns = () => [...hub.live.values()].filter((c) => c.running).length;
 
 // ---------- projects ----------
 
@@ -418,7 +496,7 @@ const server = http.createServer(async (req, res) => {
     if (!device && !fromHost(req)) return send(res, 401, { error: 'This device is not approved yet.', needApproval: true });
 
     if (p === '/api/me') {
-      return send(res, 200, { ok: true, host: os.hostname(), device: device?.id || null },
+      return send(res, 200, { ok: true, host: os.hostname(), device: device?.id || null, since: STARTED },
         device ? { 'set-cookie': deviceCookie(deviceKey(req)) } : {});
     }
 
@@ -473,6 +551,42 @@ const server = http.createServer(async (req, res) => {
       }
       hub.broadcast({ type: 'devices_changed' });
       return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/actions') {
+      // The quick-action buttons. POST replaces the custom ones.
+      if (req.method === 'POST') {
+        const { actions: list } = await readJson(req);
+        const r = actions.setActions(list);
+        if (r.error) return send(res, 400, { error: r.error });
+        hub.broadcast({ type: 'actions_changed' });
+      }
+      return send(res, 200, { actions: actions.list(), supervised: SUPERVISED });
+    }
+
+    if (p === '/api/actions/run' && req.method === 'POST') {
+      // Runs one action. `dir` is the open workspace, where its command runs.
+      // A restart stops every running turn, so unless `force` is set it is
+      // refused while turns run, and the browser asks first.
+      const { id, dir, force } = await readJson(req);
+      const action = actions.find(id);
+      if (!action) return send(res, 404, { error: 'No such action.' });
+      const busy = () => {
+        const n = runningTurns();
+        return n ? `${n} conversation${n === 1 ? ' is' : 's are'} mid-turn and would be stopped.` : '';
+      };
+      if (action.restart && !force && busy()) return send(res, 409, { error: busy(), running: runningTurns() });
+      let result = { code: 0, output: '', timedOut: false, ms: 0 };
+      if (action.command) {
+        if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.existsSync(dir)) return send(res, 400, { error: 'Project folder not found' });
+        result = await runCommand(action.command, dir);
+      }
+      // Turns may have started while the command ran; don't cut them off.
+      const blocked = action.restart && result.code === 0 && !force ? busy() : '';
+      const restarting = action.restart && result.code === 0 && !blocked;
+      send(res, 200, { ...result, restarting, blocked });
+      if (restarting) restart();
+      return;
     }
 
     if (p === '/api/agents') {

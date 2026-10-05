@@ -44,7 +44,7 @@ async function api(path, body) {
     showPairing();
     throw new Error('not approved');
   }
-  if (!res.ok) throw new Error(data.error || res.statusText);
+  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), { status: res.status, data });
   return data;
 }
 
@@ -1032,6 +1032,14 @@ function connectEvents() {
       loadDevices().catch(() => {});
       return;
     }
+    if (ev.type === 'actions_changed') {
+      loadActions().catch(() => {});
+      return;
+    }
+    if (ev.type === 'restarting') {
+      awaitRestart();
+      return;
+    }
     if (ev.type === 'status') {
       soundForStatus(ev);
       scheduleSidebarRefresh();
@@ -1924,6 +1932,204 @@ $('toggle-usage').addEventListener('click', () => {
   if (!box.classList.contains('hidden')) loadUsage();
 });
 
+// ---------- quick actions ----------
+
+// One-click buttons in the header. Restart is built in; the rest are shell
+// commands from the Settings dialog, run on the host in the open workspace's
+// folder. The list lives on the host, so every device shows the same buttons.
+let actionState = { actions: [], supervised: false };
+let actionRunning = null; // id of the action this device is running
+let serverSince = null; // when the server started, to notice it came back
+
+async function loadActions() {
+  actionState = await api('/api/actions');
+  renderActions();
+}
+
+// The header row and, for phones, the panel the ⚡ button opens show the
+// same buttons; the stylesheet decides which is visible.
+function renderActions() {
+  for (const box of [$('actions'), $('actions-panel')]) {
+    box.innerHTML = '';
+    for (const a of actionState.actions) {
+      const b = el('button', 'action-button' + (a.icon ? ' has-icon' : ''));
+      b.type = 'button';
+      b.title = a.builtin ? 'Restart agentdeck' : a.command + (a.restart ? '\nThen restart agentdeck' : '');
+      b.setAttribute('aria-label', a.builtin ? 'Restart agentdeck' : a.label);
+      if (a.icon) b.appendChild(el('span', 'action-icon', a.icon));
+      b.appendChild(el('span', 'action-label', a.label));
+      b.disabled = !!actionRunning;
+      b.classList.toggle('running', actionRunning === a.id);
+      b.onclick = () => runAction(a);
+      box.appendChild(b);
+    }
+  }
+  $('actions-toggle').classList.toggle('hidden', actionState.actions.length < 2);
+}
+
+$('actions-toggle').addEventListener('click', () => {
+  const open = $('actions-panel').classList.toggle('hidden');
+  $('actions-toggle').setAttribute('aria-expanded', String(!open));
+});
+
+async function runAction(a, force = false) {
+  if (actionRunning) return;
+  actionRunning = a.id;
+  $('actions-panel').classList.add('hidden');
+  $('actions-toggle').setAttribute('aria-expanded', 'false');
+  renderActions();
+  try {
+    const r = await api('/api/actions/run', { id: a.id, dir: ui.dir, force });
+    if (a.command) showActionResult(a, r);
+    if (r.restarting) awaitRestart();
+  } catch (err) {
+    actionRunning = null;
+    renderActions();
+    // A restart would stop running turns: the server refuses once, and asks.
+    if (err.status === 409 && err.data?.running) {
+      if (confirm(`${err.message} ${a.label} anyway?`)) return runAction(a, true);
+      return;
+    }
+    if (err.message !== 'not approved') alert(err.message);
+    return;
+  }
+  actionRunning = null;
+  renderActions();
+}
+
+// What a command printed, as a card above the composer on this device only.
+// Running the same action again replaces its card.
+function showActionResult(a, r) {
+  const box = $('action-results');
+  for (const old of box.children) if (old.actionId === a.id) old.remove();
+  const card = el('div', 'perm action-card' + (r.code === 0 ? '' : ' failed'));
+  card.actionId = a.id;
+  card.tabIndex = -1;
+  card.setAttribute('aria-label', `${a.label} result`);
+  card.appendChild(el('div', 'perm-kicker', 'QUICK ACTION'));
+  const outcome = r.timedOut ? 'stopped after 60 s' : r.code === 0 ? 'done' : `failed (exit ${r.code})`;
+  card.appendChild(el('h4', '', `${a.label} · ${outcome} · ${(r.ms / 1000).toFixed(1)} s`));
+  card.appendChild(el('pre', '', r.output || '(no output)'));
+  if (r.restarting) card.appendChild(el('div', 'action-note', 'Restarting agentdeck…'));
+  else if (r.blocked) card.appendChild(el('div', 'action-note', `Not restarted: ${r.blocked}`));
+  const row = el('div', 'row');
+  const close = el('button', '', 'Dismiss');
+  close.type = 'button';
+  close.onclick = () => card.remove();
+  row.appendChild(close);
+  card.appendChild(row);
+  box.prepend(card);
+  card.focus({ preventScroll: true });
+}
+
+// The server is going away: wait for it to come back, then reload so the
+// page gets the new code too. The composer's text survives the reload.
+let restartTimer = 0;
+
+function awaitRestart() {
+  if (restartTimer) return;
+  const status = $('status');
+  status.classList.remove('status-error');
+  status.innerHTML = '';
+  status.append(el('span', 'dot'), document.createTextNode('Restarting agentdeck…'));
+  const started = Date.now();
+  const check = async () => {
+    try {
+      const res = await fetch('/api/me', { cache: 'no-store' });
+      const me = res.ok ? await res.json() : null;
+      // Any answer from a new process (or a refusal, if this device was
+      // removed meanwhile) means it's back. The old process answers until it exits.
+      if (!res.ok || me.since !== serverSince) {
+        if ($('input').value) sessionStorage.setItem('cw_draft', $('input').value);
+        return location.reload();
+      }
+    } catch {}
+    if (Date.now() - started > 90_000) {
+      restartTimer = 0;
+      status.classList.add('status-error');
+      status.setAttribute('role', 'alert');
+      status.textContent = "agentdeck didn't come back. Start it again on the host.";
+      return;
+    }
+    restartTimer = setTimeout(check, 700);
+  };
+  restartTimer = setTimeout(check, 1000);
+}
+
+// Settings dialog: the custom actions are edited as a draft and saved together.
+let draftActions = [];
+
+function renderActionEditor() {
+  const list = $('action-list');
+  list.innerHTML = '';
+  const restart = actionState.actions.find((a) => a.builtin);
+  if (restart) {
+    const fixed = el('div', 'action-row action-fixed');
+    fixed.append(el('span', 'action-icon', restart.icon), el('span', '', `${restart.label} — restarts agentdeck (built in)`));
+    list.appendChild(fixed);
+  }
+  const field = (cls, value, placeholder, maxLength, label) => {
+    const input = el('input', cls);
+    Object.assign(input, { type: 'text', value, placeholder, maxLength, autocomplete: 'off', spellcheck: false });
+    input.setAttribute('aria-label', label);
+    return input;
+  };
+  draftActions.forEach((a, i) => {
+    const row = el('div', 'action-row');
+    const icon = field('action-icon-input', a.icon, '🔧', 8, `Icon of action ${i + 1}`);
+    icon.oninput = () => (a.icon = icon.value);
+    const label = field('action-label-input', a.label, 'Label', 24, `Label of action ${i + 1}`);
+    label.oninput = () => (a.label = label.value);
+    const rm = el('button', 'action-remove', '×');
+    rm.type = 'button';
+    rm.setAttribute('aria-label', `Remove action ${a.label || i + 1}`);
+    rm.onclick = () => {
+      draftActions.splice(i, 1);
+      renderActionEditor();
+    };
+    const command = field('action-command', a.command, 'Shell command, e.g. git pull', 1000, `Command of action ${i + 1}`);
+    command.oninput = () => (a.command = command.value);
+    const restartLabel = el('label', 'action-restart');
+    const restartBox = el('input');
+    restartBox.type = 'checkbox';
+    restartBox.checked = a.restart;
+    restartBox.onchange = () => (a.restart = restartBox.checked);
+    restartLabel.append(restartBox, document.createTextNode('Restart agentdeck when it succeeds'));
+    row.append(icon, label, rm, command, restartLabel);
+    list.appendChild(row);
+  });
+}
+
+function openSettings() {
+  draftActions = actionState.actions.filter((a) => !a.builtin).map((a) => ({ ...a }));
+  $('settings-error').textContent = '';
+  renderActionEditor();
+  $('settings-dialog').showModal();
+}
+
+$('open-settings').addEventListener('click', openSettings);
+
+$('action-add').addEventListener('click', () => {
+  draftActions.push({ icon: '', label: '', command: '', restart: false });
+  renderActionEditor();
+  $('action-list').querySelector('.action-row:last-child .action-label-input')?.focus();
+});
+
+$('settings-cancel').addEventListener('click', () => $('settings-dialog').close());
+
+$('settings-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('settings-error').textContent = '';
+  try {
+    actionState = await api('/api/actions', { actions: draftActions });
+    renderActions();
+    $('settings-dialog').close();
+  } catch (err) {
+    if (err.message === 'not approved') return;
+    $('settings-error').textContent = err.message;
+  }
+});
+
 // ---------- devices ----------
 
 // Browsers waiting for approval show up as cards on every approved device,
@@ -2039,9 +2245,20 @@ $('device-form').addEventListener('submit', (e) => {
 
 async function start() {
   const me = await api('/api/me');
+  serverSince = me.since;
   $('app').classList.remove('hidden');
   loadDevices().catch(() => {}); // a device waiting for approval shouldn't wait for the rest
+  loadActions().catch(() => {});
   $('host').textContent = 'Host: ' + me.host;
+  // A message being typed when agentdeck restarted comes back.
+  const draft = sessionStorage.getItem('cw_draft');
+  if (draft) {
+    sessionStorage.removeItem('cw_draft');
+    if (!$('input').value) {
+      $('input').value = draft;
+      autosize();
+    }
+  }
   ui.agents = await api('/api/agents');
   const sel = $('agent');
   sel.innerHTML = '';

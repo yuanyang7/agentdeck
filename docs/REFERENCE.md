@@ -16,6 +16,7 @@ Detailed configuration and internals for agentdeck. Start with
 | `OPENCODE_BIN`  | `opencode` on `PATH`, else `~/.opencode/bin/opencode` | opencode binary to start.            |
 | `OPENCODE_URL`  | none                        | Use an already running `opencode serve` instead of starting one (with `OPENCODE_SERVER_PASSWORD` if it has one). |
 | `WORKSPACE_INDEX` | on                        | `off` stops giving agents the [workspace index](#workspace-index). |
+| `AGENTDECK_SUPERVISED` | detected               | `1` if something restarts agentdeck when it exits, `0` if nothing does; see [Quick actions](#quick-actions). |
 
 ```bash
 PASSWORD='something-long' npm start
@@ -288,6 +289,47 @@ Browsers block audio until the page has been interacted with, and suspend it
 again when a phone locks or a tab sleeps, so every click and key press on the
 page wakes the sound up. A page that has only ever been scrolled stays silent.
 
+## Quick actions
+
+The buttons at the right end of the header. **Restart** is built in; the
+others come from **Settings** in the sidebar footer and are kept in
+`~/.agentdeck/actions.json` (`{ actions: [{ id, icon, label, command,
+restart }] }`), so every device shows the same ones. At most 12, with labels
+of up to 24 characters and commands of up to 1,000. Each command runs
+through `$SHELL -c` (else `/bin/sh`) in the folder of the workspace open on
+the page that pressed it, with the server's environment plus
+`AGENTDECK_DIR` (agentdeck's own folder) and `AGENTDECK_PORT`. It gets 60
+seconds, after which its whole process group is killed, and its output (both
+streams, up to 100 KB) comes back to the page that pressed the button as a
+card above the composer. The exit code decides whether the card is marked
+failed. An action with *Restart agentdeck when it succeeds* restarts after
+an exit code of 0.
+
+A restart stops every running turn, since agents run inside the server. So
+`POST /api/actions/run` answers `409` with the number of running turns
+unless `force` is set, and the page asks before sending it again; if turns
+started while a command ran, the restart is skipped and the card says so.
+The server then tells every page (`restarting` event), waits 300 ms and
+exits. How it comes back depends on how it was started:
+
+- Under the [LaunchAgent](#keeping-it-running-launchagent) (or systemd, or
+  pm2) the supervisor starts it again. On macOS this is detected by asking
+  `launchctl list` whether the server's own pid is a job, rather than by
+  reading the environment, because everything an agent runs inside agentdeck
+  inherits that environment.
+- Started by hand (`npm start`, `node server.mjs`, with or without `nohup`),
+  it starts itself again: a detached shell waits for the old process to end,
+  which frees the port, then runs the same command in the same folder with
+  the same environment and output. A terminal that ran `npm start` in the
+  foreground gets its prompt back while the new server keeps printing there.
+
+`AGENTDECK_SUPERVISED=1` or `0` overrides the detection. Pages poll
+`/api/me` until a process with a different `since` answers, then reload, so
+they also get any new page code; the composer's text is kept across the
+reload in session storage. Anyone who can use agentdeck can run these
+commands, which is no more than an agent in a bypass mode can already do;
+the same device approval and same-site checks apply.
+
 ## Code layout
 
 - `server.mjs`: HTTP routes, device approval checks, projects.
@@ -302,6 +344,8 @@ page wakes the sound up. A page that has only ever been scrolled stays silent.
   projects a message names.
 - `lib/commands.mjs`: reading a `/name` message and caching each folder's
   list of skills.
+- `lib/actions.mjs`: the quick-action buttons; the restart itself is in
+  `server.mjs`.
 - `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,
   `opencode.mjs`). The interface they implement is described in
   `lib/agents/index.mjs`; adding an agent means adding a file there and
@@ -352,10 +396,12 @@ pkill -f 'node server.mjs'; cd ~/code/agentdeck && nohup npm start > /tmp/agentd
 With the LaunchAgent, update the paths in the plist, then
 `launchctl unload` and `launchctl load` it again.
 
-**Restarting from inside agentdeck.** Asking an agent in agentdeck to rename
-the project folder or restart the server stops the conversation doing the
-work, because that conversation runs inside the server. Make changes like
-these from a terminal on the host.
+**Restarting from inside agentdeck.** Asking an agent in agentdeck to
+restart the server, or to rename the project folder, stops the conversation
+doing the work, because that conversation runs inside the server. Let the
+agent finish its change, then press **Restart** in the header yourself (see
+[Quick actions](#quick-actions)); it waits for your go-ahead if turns are
+still running. Renames still need a terminal on the host.
 
 **Checking whether it's up.** On the host, `curl -i http://localhost:7878/`
 should return `200`, and `lsof -nP -iTCP:7878 -sTCP:LISTEN` shows the

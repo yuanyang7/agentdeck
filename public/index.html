@@ -44,7 +44,7 @@
         <div class="sidebar-section-title">WORKSPACES <span>Recent activity</span></div>
         <div id="workspaces"></div>
       </div>
-      <div class="sidebar-foot"><span id="host"></span><button id="open-devices" class="foot-link" type="button">Devices</button></div>
+      <div class="sidebar-foot"><span id="host"></span><span class="foot-links"><button id="open-settings" class="foot-link" type="button">Settings</button><button id="open-devices" class="foot-link" type="button">Devices</button></span></div>
     </aside>
 
     <main class="main">
@@ -59,12 +59,18 @@
         <button id="approval-jump" class="approval-jump hidden" type="button" aria-controls="pending"><span class="approval-text">Review request</span><span class="approval-short">Review</span><span id="approval-count" class="approval-count">1</span></button>
         <button id="toggle-sound" class="sound-button" type="button" aria-pressed="true"><span aria-hidden="true">🔔</span></button>
         <button id="toggle-usage" class="usage-button" type="button" title="Usage">Usage <span aria-hidden="true">↗</span></button>
+        <div id="actions" class="actions" role="group" aria-label="Quick actions"></div>
+        <button id="actions-toggle" class="actions-toggle hidden" type="button" aria-expanded="false" aria-controls="actions-panel" aria-label="More quick actions" title="Quick actions"><span aria-hidden="true">⚡</span></button>
       </header>
       <div id="announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
       <div id="usage" class="usage hidden"></div>
 
+      <div id="actions-panel" class="actions-panel hidden" role="group" aria-label="Quick actions"></div>
+
       <div id="messages" class="messages"></div>
+
+      <div id="action-results" class="pending" role="region" aria-label="Quick action results"></div>
 
       <div id="device-requests" class="pending" role="region" aria-label="Devices waiting for approval"></div>
 
@@ -128,6 +134,21 @@
       <div id="device-list" class="folder-list"></div>
       <div class="tag-actions">
         <button type="submit" class="primary">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settings-dialog" class="tag-dialog settings-dialog">
+    <form method="dialog" id="settings-form">
+      <h2>Settings</h2>
+      <div class="sidebar-section-title settings-title">QUICK ACTIONS</div>
+      <p class="muted folder-hint">Buttons in the header that run on the host with one click, on every device. <strong>Restart</strong> is built in. Add your own shell commands: each runs in the open workspace's folder, with <code>$AGENTDECK_DIR</code> set to agentdeck's own folder, and shows what it printed.</p>
+      <div id="action-list" class="action-list"></div>
+      <button type="button" id="action-add" class="action-add">＋ Add action</button>
+      <p id="settings-error" class="error"></p>
+      <div class="tag-actions">
+        <button type="button" id="settings-cancel">Cancel</button>
+        <button type="submit" class="primary">Save</button>
       </div>
     </form>
   </dialog>
