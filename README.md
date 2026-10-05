@@ -17,6 +17,8 @@ anything started in a terminal or desktop app shows up here too, and anything
 started here can be resumed there (`claude --resume`, the Codex app or
 `codex resume`, or the session list in opencode).
 
+![A conversation open in agentdeck, showing the sidebar with tagged conversations and a reply with tool calls and an inline image](docs/images/screenshot.png)
+
 ## Quick start
 
 ```bash
