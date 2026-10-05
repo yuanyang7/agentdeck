@@ -67,8 +67,9 @@
 
       <form id="composer" class="composer">
         <div id="attachments" class="attachments hidden"></div>
+        <div id="command-menu" class="command-menu hidden" role="listbox" aria-label="Skills and commands"></div>
         <label class="sr-only" for="input">Message</label>
-        <textarea id="input" rows="1" placeholder="Ask anything about your project..."></textarea>
+        <textarea id="input" rows="1" placeholder="Ask anything about your project..." aria-controls="command-menu" aria-autocomplete="list"></textarea>
         <div class="composer-row">
           <div class="composer-options">
             <select id="agent" title="Agent (for a new conversation)" aria-label="Agent" class="hidden"></select>

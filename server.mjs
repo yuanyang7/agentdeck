@@ -322,6 +322,18 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, await backend.options());
     }
 
+    if (p === '/api/commands') {
+      // Skills and slash commands for the composer's `/` menu.
+      const backend = await backendFor(url.searchParams.get('agent'));
+      if (!backend) return send(res, 404, { error: 'Unknown agent' });
+      const dir = url.searchParams.get('dir') || '';
+      if (!path.isAbsolute(dir) || !fs.existsSync(dir)) return send(res, 400, { error: 'Project folder not found' });
+      // A skill can be listed twice, e.g. Codex reads both .agents/skills
+      // and .codex/skills; `/name` runs the first.
+      const list = backend.commands ? await backend.commands(dir) : [];
+      return send(res, 200, list.filter((c, i) => list.findIndex((x) => x.name === c.name) === i));
+    }
+
     if (p === '/api/usage') {
       const backend = await backendFor(url.searchParams.get('agent') || 'claude');
       if (!backend?.usage) return send(res, 404, { error: 'No usage for this agent' });

@@ -41,6 +41,32 @@ For Codex and opencode the server starts a private `codex app-server` /
 `opencode serve` the first time it is needed and stops it when the server
 exits.
 
+## Skills
+
+The `/` menu lists what the chat's agent offers in the project folder. Each
+list is fetched at most once a minute, so a skill added on disk shows up
+within a minute. A message that starts with `/name` runs it:
+
+- **Claude Code**: everything its own `/` menu has, i.e. skills and commands
+  from `~/.claude`, the project's `.claude` folder, plugins and claude.ai,
+  plus built-in commands such as `/compact`, `/context` and `/code-review`.
+  The message goes to Claude Code as typed, and Claude Code runs it. The
+  menu leaves out commands that only work in a terminal (Claude Code names
+  them once a turn has run since agentdeck started) and `/model`, `/effort`
+  and `/clear`, whose jobs the model and effort pickers and New
+  conversation do. History shows the command as typed, followed by
+  whatever a command like `/compact` printed.
+- **Codex**: the skills Codex finds for the folder (`skills/list`). Its
+  slash commands belong to its terminal UI, so there are none here. `/name`
+  is sent the way Codex's own apps send a skill: as `$name` in the text plus
+  the skill itself, which loads its instructions into the turn. The message
+  then shows as `$name …`.
+- **opencode**: its commands (the project's and your own, MCP prompts, and
+  opencode's `/init` and `/review`) and its skills. A command runs on the
+  opencode server, which fills its template into the prompt. The message
+  shows as typed while the turn runs, but history shows the filled-in
+  prompt. A skill is sent as an attachment to the message.
+
 ## Tags
 
 Tags are saved on the host in `~/.agentdeck/tags.json` (migrated
@@ -215,6 +241,8 @@ page wakes the sound up. A page that has only ever been scrolled stays silent.
 - `lib/workspace-index.mjs`: the project map given to agents.
 - `lib/folders.mjs`: a chat's extra folders: checking them and spotting
   projects a message names.
+- `lib/commands.mjs`: reading a `/name` message and caching each folder's
+  list of skills.
 - `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,
   `opencode.mjs`). The interface they implement is described in
   `lib/agents/index.mjs`; adding an agent means adding a file there and

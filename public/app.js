@@ -1290,6 +1290,7 @@ async function loadOptions(agent) {
 async function selectAgent(agent) {
   if (!ui.agents.some((a) => a.id === agent)) agent = ui.agents[0]?.id || 'claude';
   ui.agent = agent;
+  hideCommandMenu();
   $('agent').value = agent;
   $('agent').disabled = !!ui.key;
   $('input').placeholder = `Message ${agentLabel(agent)}…`;
@@ -1492,10 +1493,171 @@ function autosize() {
 }
 input.addEventListener('input', autosize);
 input.addEventListener('keydown', (e) => {
+  if (commandMenuKey(e)) return;
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(pointer: coarse)').matches) {
     e.preventDefault();
     $('composer').requestSubmit();
   }
+});
+
+// ---------- skills and commands ----------
+
+// Typing `/` at the start of a message lists the agent's skills and slash
+// commands for this folder; picking one puts `/name ` in the box, and the
+// agent runs it when the message is sent (see lib/commands.mjs). Lists are
+// cached per agent and folder for a minute, like the server's.
+const commandLists = new Map(); // 'agent\ndir' -> { at, promise, list, error }
+const cmdMenu = { query: null, shown: [], active: 0, dismissed: null };
+
+// A list that failed to load is asked for again after a few seconds.
+function loadCommands(agent, dir) {
+  const k = agent + '\n' + dir;
+  const hit = commandLists.get(k);
+  if (hit && Date.now() - hit.at < 60_000) return hit;
+  const entry = { at: Date.now(), list: hit?.list || null, error: null };
+  entry.promise = api(`/api/commands?agent=${encodeURIComponent(agent)}&dir=${encodeURIComponent(dir)}`).then(
+    (list) => (entry.list = list),
+    (err) => {
+      entry.at = Date.now() - 55_000;
+      entry.error = err.message;
+      return (entry.list ||= []);
+    },
+  );
+  commandLists.set(k, entry);
+  return entry;
+}
+
+// The name being typed after a leading `/`, or null when the caret isn't in
+// a message's first word or that word doesn't start with `/`.
+function typedCommand() {
+  if (input.selectionStart !== input.selectionEnd) return null;
+  const m = /^\/([^\s/]*)$/.exec(input.value.slice(0, input.selectionStart));
+  return m ? m[1] : null;
+}
+
+// Names (and aliases) that start with what's typed come first, then ones
+// that contain it, then ones whose description does.
+function matchCommands(list, q) {
+  const s = q.toLowerCase();
+  const names = (c) => [c.name, ...(c.aliases || [])].map((n) => n.toLowerCase());
+  const starts = list.filter((c) => names(c).some((n) => n.startsWith(s)));
+  const contains = list.filter((c) => !starts.includes(c) && names(c).some((n) => n.includes(s)));
+  const described = s.length < 3 ? [] : list.filter((c) => !starts.includes(c) && !contains.includes(c) && c.description.toLowerCase().includes(s));
+  return [...starts, ...contains, ...described];
+}
+
+async function updateCommandMenu() {
+  const q = typedCommand();
+  if (q !== cmdMenu.dismissed) cmdMenu.dismissed = null;
+  if (q === null || q === cmdMenu.dismissed || !ui.dir || !ui.agent) return hideCommandMenu();
+  const agent = ui.agent;
+  const dir = ui.dir;
+  const entry = loadCommands(agent, dir);
+  if (!entry.list) {
+    cmdMenu.query = null;
+    showCommandMenu();
+    $('command-menu').replaceChildren(el('div', 'cmd-empty', 'Loading skills…'));
+    await entry.promise;
+    if (ui.agent === agent && ui.dir === dir) updateCommandMenu();
+    return;
+  }
+  if (q === cmdMenu.query && !$('command-menu').classList.contains('hidden')) return;
+  cmdMenu.query = q;
+  cmdMenu.shown = matchCommands(entry.list, q);
+  cmdMenu.active = 0;
+  if (cmdMenu.shown.length) {
+    showCommandMenu();
+    renderCommandMenu();
+  } else if (!entry.list.length && !q) {
+    showCommandMenu();
+    const why = entry.error ? `Could not load skills: ${entry.error}` : `${agentLabel(agent)} has no skills or commands here.`;
+    $('command-menu').replaceChildren(el('div', 'cmd-empty', why));
+  } else {
+    hideCommandMenu();
+  }
+}
+
+function showCommandMenu() {
+  $('command-menu').classList.remove('hidden');
+  input.setAttribute('aria-expanded', 'true');
+}
+
+function hideCommandMenu() {
+  cmdMenu.query = null;
+  cmdMenu.shown = [];
+  $('command-menu').classList.add('hidden');
+  input.setAttribute('aria-expanded', 'false');
+  input.removeAttribute('aria-activedescendant');
+}
+
+function renderCommandMenu() {
+  const box = $('command-menu');
+  box.replaceChildren();
+  cmdMenu.shown.forEach((c, i) => {
+    const row = el('div', 'cmd' + (i === cmdMenu.active ? ' active' : ''));
+    row.id = 'cmd-' + i;
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(i === cmdMenu.active));
+    const head = el('div', 'cmd-head');
+    head.appendChild(el('span', 'cmd-name', '/' + c.name));
+    if (c.hint) head.appendChild(el('span', 'cmd-hint', c.hint));
+    row.appendChild(head);
+    if (c.description) {
+      const desc = el('div', 'cmd-desc', c.description);
+      desc.title = c.description;
+      row.appendChild(desc);
+    }
+    // Keeps the caret in the message box.
+    row.addEventListener('mousedown', (e) => e.preventDefault());
+    row.addEventListener('click', () => pickCommand(c));
+    box.appendChild(row);
+  });
+  input.setAttribute('aria-activedescendant', 'cmd-' + cmdMenu.active);
+  box.children[cmdMenu.active]?.scrollIntoView({ block: 'nearest' });
+}
+
+// Replaces the first word with `/name ` and leaves the caret after it, for
+// the arguments.
+function pickCommand(c) {
+  const rest = input.value.slice(input.selectionStart).replace(/^\S*\s*/, '');
+  input.value = `/${c.name} ${rest}`;
+  const caret = c.name.length + 2;
+  input.setSelectionRange(caret, caret);
+  hideCommandMenu();
+  autosize();
+  input.focus();
+}
+
+// Arrow keys move through the open menu, Enter or Tab picks, Escape closes it
+// until the typed name changes. Returns whether the key was used.
+function commandMenuKey(e) {
+  if ($('command-menu').classList.contains('hidden') || e.isComposing) return false;
+  const n = cmdMenu.shown.length;
+  if (e.key === 'Escape') {
+    cmdMenu.dismissed = typedCommand();
+    hideCommandMenu();
+  } else if (!n) {
+    return false;
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    cmdMenu.active = (cmdMenu.active + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+    renderCommandMenu();
+  } else if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+    pickCommand(cmdMenu.shown[cmdMenu.active]);
+  } else {
+    return false;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  return true;
+}
+
+input.addEventListener('input', updateCommandMenu);
+input.addEventListener('click', updateCommandMenu);
+input.addEventListener('keyup', (e) => {
+  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) updateCommandMenu();
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!$('composer').contains(e.target)) hideCommandMenu();
 });
 
 // ---------- image attachments ----------
@@ -1632,6 +1794,7 @@ $('composer').addEventListener('submit', async (e) => {
     if (isNew) loadSessions();
     setRunning(true);
     input.value = '';
+    hideCommandMenu();
     attachments.length = 0;
     renderAttachments();
     autosize();

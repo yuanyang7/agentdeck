@@ -59,6 +59,15 @@ adapt to show what the selected agent offers — see
 modes mean. The **Usage** button in the header shows the plan limits of
 whichever agent's login is active.
 
+### Skills
+
+Type `/` at the start of a message to list the skills and slash commands
+the chat's agent has in this project: your own, the project's, plugins'
+and the agent's built-in ones. Keep typing to filter, pick one with the
+arrow keys and Enter (or Tab, or a click), add any arguments and send.
+Typing `/name` yourself works the same as picking it. See
+[docs/REFERENCE.md](docs/REFERENCE.md#skills) for how each agent runs them.
+
 ### Tags
 
 Hover a conversation in the sidebar and click the tag button to add or
