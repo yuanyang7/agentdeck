@@ -2,6 +2,12 @@
 
 ## Completed
 
+### 2026-10-05 — Identify OpenCode Go models
+
+- Final behavior: The opencode model picker prefixes models from the `opencode-go` provider with `Go ·`, including the default-model label when applicable. Models from the regular `opencode` provider keep their names, so identical model names from the two providers are distinguishable.
+- Verification: Queried the installed OpenCode v2 model list and confirmed that it returns both provider IDs with duplicate model names. Checked the updated adapter's output against that live list and ran `node --check` and `git diff --check`.
+- Remaining limitations: The label depends on OpenCode continuing to identify Go models with the `opencode-go` provider ID.
+
 ### 2026-10-05 — Honor Codex Full Access approvals
 
 - Final behavior: AgentDeck refreshes Codex's effective settings on every resumed turn. It accepts command and file approval events without prompting only when Full access is selected and the app-server reports `approvalPolicy: never`, an unrestricted sandbox, and no conflicting active permission profile. If the effective policy never asks but the sandbox is restricted, the operation is declined silently. Granular command callbacks remain interactive when either sandbox or exec-policy rule approvals are enabled; file-change prompts follow the sandbox setting. Explicit extra-permission requests are declined silently when their category is disabled. Other approval requests still ask; interactive tool questions remain interactive.
