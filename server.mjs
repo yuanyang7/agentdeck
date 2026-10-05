@@ -10,7 +10,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import net from 'node:net';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { Hub, BusyError } from './lib/hub.mjs';
 import { backends, availableBackends } from './lib/agents/index.mjs';
@@ -19,6 +21,7 @@ import { isUnread, markRead } from './lib/reads.mjs';
 import { settingsOf, setSettings } from './lib/chat-settings.mjs';
 import { workspaceIndex, enabled as workspaceIndexEnabled } from './lib/workspace-index.mjs';
 import { rootFolders, checkFolders, mentionedFolders } from './lib/folders.mjs';
+import * as devices from './lib/devices.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 7878);
@@ -53,7 +56,11 @@ function magicDnsName() {
 
 // ---------- auth ----------
 
-const tokens = new Set();
+// Every browser has to be approved once (lib/devices.mjs), and then sends its
+// device key in a cookie. The terminal on the host (`npm run approve`) sends
+// the host key instead.
+const DEVICE_COOKIE = 'agentdeck_device';
+const HOST_KEY = devices.hostKey();
 
 function parseCookies(req) {
   const out = {};
@@ -64,16 +71,84 @@ function parseCookies(req) {
   return out;
 }
 
-function authed(req) {
-  if (!PASSWORD) return true;
-  return tokens.has(parseCookies(req).agentdeck_token);
-}
+const deviceKey = (req) => parseCookies(req)[DEVICE_COOKIE];
+
+// Browsers keep a cookie for at most 400 days; /api/me renews it on each visit.
+const deviceCookie = (key) => `${DEVICE_COOKIE}=${key}; HttpOnly; SameSite=Strict; Path=/; Max-Age=34560000`;
 
 function safeEqual(a, b) {
   const ha = crypto.createHash('sha256').update(a).digest();
   const hb = crypto.createHash('sha256').update(b).digest();
   return crypto.timingSafeEqual(ha, hb);
 }
+
+function fromHost(req) {
+  const m = /^Bearer (\S+)$/.exec(req.headers.authorization || '');
+  return !!m && safeEqual(m[1], HOST_KEY);
+}
+
+// A page from another site, or from another port of this host, must not be
+// able to drive agentdeck through a browser that has it open. Browsers say
+// where a request comes from; tools like curl don't, and need a key anyway.
+function crossSite(req) {
+  const site = req.headers['sec-fetch-site'];
+  if (site) return site !== 'same-origin' && site !== 'none';
+  const origin = req.headers.origin;
+  if (!origin) return false;
+  try {
+    return new URL(origin).host !== req.headers.host;
+  } catch {
+    return true;
+  }
+}
+
+// DNS rebinding: a site can point its own name at this machine to get around
+// the same-origin rule, and then the Host header carries that name. Accept
+// IP addresses, names without a dot (localhost, MagicDNS short names), names
+// under .ts.net and .local, and ALLOWED_HOSTS.
+const ALLOWED_HOSTS = new Set((process.env.ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean));
+
+function knownHost(req) {
+  const host = (req.headers.host || '').toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+  if (!host || net.isIP(host.replace(/^\[|\]$/g, ''))) return true;
+  return !host.includes('.') || /\.(ts\.net|local)$/.test(host) || ALLOWED_HOSTS.has(host);
+}
+
+// Wrong passwords per address, to slow down guessing.
+const failures = new Map(); // address -> times of recent wrong passwords
+const MAX_FAILURES = 5;
+const FAILURE_WINDOW = 10 * 60_000;
+
+function recentFailures(addr) {
+  const recent = (failures.get(addr) || []).filter((t) => Date.now() - t < FAILURE_WINDOW);
+  if (recent.length) failures.set(addr, recent);
+  else failures.delete(addr);
+  return recent;
+}
+
+const execFileP = promisify(execFile);
+
+// Which tailnet machine a request comes from, as Tailscale names it, to show
+// in the approval prompt. `tailscale serve` passes the client's address along.
+async function machineOf(req) {
+  let ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  if (ip === '127.0.0.1' || ip === '::1') {
+    ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (!net.isIP(ip)) return 'localhost';
+  }
+  try {
+    const { stdout } = await execFileP('tailscale', ['whois', '--json', ip], { timeout: 3000 });
+    return JSON.parse(stdout).Node?.Name?.split('.')[0] || ip;
+  } catch {
+    return ip;
+  }
+}
+
+const deviceInfo = async (req) => ({ name: devices.nameOf(req.headers['user-agent']), machine: await machineOf(req) });
+
+// Live event streams -> the device that opened them, so revoking a device
+// cuts its pages off at once.
+const streams = new Map();
 
 // Every conversation starts with a map of the projects (lib/workspace-index.mjs),
 // and a message naming one of them offers it as an extra folder (lib/folders.mjs).
@@ -274,27 +349,63 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
 
   try {
+    if (!knownHost(req)) {
+      return send(res, 403, `agentdeck doesn't answer to the name ${req.headers.host}. Add it to ALLOWED_HOSTS if it's yours.`);
+    }
+
     if (STATIC[p] && req.method === 'GET') {
       const [file, type] = STATIC[p];
       return send(res, 200, fs.readFileSync(path.join(ROOT, file)), { 'content-type': type });
     }
 
-    if (p === '/api/login' && req.method === 'POST') {
-      const { password } = await readJson(req);
-      if (!PASSWORD || (typeof password === 'string' && safeEqual(password, PASSWORD))) {
-        const t = crypto.randomBytes(32).toString('hex');
-        tokens.add(t);
-        return send(res, 200, { ok: true }, {
-          'set-cookie': `agentdeck_token=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`,
-        });
+    if (!p.startsWith('/api/')) return send(res, 404, 'Not found');
+    if (crossSite(req)) return send(res, 403, { error: 'Requests from other sites are refused.' });
+
+    if (p === '/api/pair') {
+      // A browser that isn't approved yet: GET says where it stands, POST
+      // asks for approval (once; asking again returns the same request).
+      let key = deviceKey(req);
+      const status = devices.statusOf(key);
+      if (req.method !== 'POST' || status.status === 'approved' || status.status === 'waiting') {
+        return send(res, 200, { ...status, password: !!PASSWORD });
       }
-      return send(res, 401, { error: 'Wrong password' });
+      const headers = {};
+      if (!devices.validKey(key)) {
+        key = devices.newKey();
+        headers['set-cookie'] = deviceCookie(key);
+      }
+      const { created, error, ...asked } = devices.ask(key, await deviceInfo(req));
+      if (error) return send(res, 429, { error }, headers);
+      if (created) hub.broadcast({ type: 'devices_changed' });
+      return send(res, 200, { ...asked, password: !!PASSWORD }, headers);
     }
 
-    if (!p.startsWith('/api/')) return send(res, 404, 'Not found');
-    if (!authed(req)) return send(res, 401, { error: 'login required', needPassword: true });
+    if (p === '/api/login' && req.method === 'POST') {
+      // The password approves this browser, as an approved device would.
+      if (!PASSWORD) return send(res, 400, { error: 'No password is set on the host.' });
+      const addr = req.socket.remoteAddress;
+      if (recentFailures(addr).length >= MAX_FAILURES) {
+        return send(res, 429, { error: 'Too many wrong passwords. Try again in a few minutes.' });
+      }
+      const { password } = await readJson(req);
+      if (typeof password !== 'string' || !safeEqual(password, PASSWORD)) {
+        failures.set(addr, [...recentFailures(addr), Date.now()]);
+        return send(res, 401, { error: 'Wrong password' });
+      }
+      let key = deviceKey(req);
+      if (!devices.validKey(key)) key = devices.newKey();
+      devices.approveKey(key, await deviceInfo(req));
+      hub.broadcast({ type: 'devices_changed' });
+      return send(res, 200, { ok: true }, { 'set-cookie': deviceCookie(key) });
+    }
 
-    if (p === '/api/me') return send(res, 200, { ok: true, host: os.hostname() });
+    const device = devices.deviceFor(deviceKey(req));
+    if (!device && !fromHost(req)) return send(res, 401, { error: 'This device is not approved yet.', needApproval: true });
+
+    if (p === '/api/me') {
+      return send(res, 200, { ok: true, host: os.hostname(), device: device?.id || null },
+        device ? { 'set-cookie': deviceCookie(deviceKey(req)) } : {});
+    }
 
     if (p === '/api/events') {
       res.writeHead(200, {
@@ -304,12 +415,47 @@ const server = http.createServer(async (req, res) => {
       });
       res.write(': hi\n\n');
       hub.clients.add(res);
+      if (device) streams.set(res, device.id);
       const ping = setInterval(() => res.write(': ping\n\n'), 20000);
       req.on('close', () => {
         clearInterval(ping);
         hub.clients.delete(res);
+        streams.delete(res);
       });
       return;
+    }
+
+    if (p === '/api/devices') {
+      return send(res, 200, { devices: devices.list(), waiting: devices.waiting(), current: device?.id || null });
+    }
+
+    if (p === '/api/devices/approve' && req.method === 'POST') {
+      const { code } = await readJson(req);
+      const approved = devices.approve(code);
+      if (!approved) return send(res, 404, { error: 'No device is waiting with that code.' });
+      hub.broadcast({ type: 'devices_changed' });
+      return send(res, 200, { device: approved });
+    }
+
+    if (p === '/api/devices/deny' && req.method === 'POST') {
+      const { code } = await readJson(req);
+      if (!devices.deny(code)) return send(res, 404, { error: 'No device is waiting with that code.' });
+      hub.broadcast({ type: 'devices_changed' });
+      return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/devices/revoke' && req.method === 'POST') {
+      const { id } = await readJson(req);
+      if (!devices.revoke(id)) return send(res, 404, { error: 'No such device.' });
+      // Its open pages lose the live stream now and ask for approval again.
+      for (const [stream, owner] of streams) {
+        if (owner !== id) continue;
+        hub.clients.delete(stream);
+        streams.delete(stream);
+        stream.end();
+      }
+      hub.broadcast({ type: 'devices_changed' });
+      return send(res, 200, { ok: true });
     }
 
     if (p === '/api/agents') {
@@ -566,7 +712,9 @@ server.listen(PORT, HOST, () => {
   console.log(`agentdeck listening on http://${HOST}:${PORT}`);
   const name = HOST.startsWith('100.') && magicDnsName();
   if (name) console.log(`Open from other devices: http://${name}:${PORT}  (or http://${name.split('.')[0]}:${PORT})`);
-  console.log(PASSWORD ? 'Password protection: on' : 'Password protection: off (set PASSWORD to enable)');
+  const approved = devices.list().length;
+  console.log(`Approved devices: ${approved}${approved ? '' : ' (open agentdeck in a browser, then run `npm run approve` here)'}`);
+  if (PASSWORD) console.log('Password: on (it also approves a device)');
   console.log(`Project roots: ${PROJECT_ROOTS.join(', ')}`);
   console.log(`Workspace index for agents: ${workspaceIndexEnabled ? 'on' : 'off'}`);
   availableBackends().then((list) => console.log(`Agents: ${list.map((b) => b.label).join(', ')}`));

@@ -37,14 +37,29 @@ to open from other devices; prefer the MagicDNS name it prints
 `http://` prefix. It also answers on `http://localhost:7878` on the host
 itself.
 
-Password, port, project roots, and other settings are environment
+The first time you open it, the page shows a code and waits for approval.
+Run `npm run approve` in this folder on the host to let that browser in.
+After that, a new device can be approved from one you already use (see
+[Security](#security)).
+
+Port, project roots, an optional password, and other settings are environment
 variables — see [docs/REFERENCE.md](docs/REFERENCE.md#environment-variables).
 
 ## Security
 
-Anyone who can open this page can run commands on the host through the
-agents. Keep it on a private network like Tailscale, and set a `PASSWORD`
-(see the reference doc above) if others share that network.
+Anyone who can use this page can run commands on the host through the
+agents, so each browser has to be approved once. A new browser shows a
+short code and waits. Every device that already uses agentdeck gets a prompt
+with the same code: approve it there if it matches the screen you're holding.
+For the very first device, run `npm run approve` on the host. Approvals are
+kept on the host, so restarts don't sign anyone out. **Devices**, at the
+bottom of the sidebar, lists them and removes any you no longer use. If a
+`PASSWORD` is set, typing it also approves a browser.
+
+agentdeck also refuses requests that a page from another site makes
+through your browser, so a website you visit can't drive it. Keep it on a
+private network like Tailscale all the same. See
+[docs/REFERENCE.md](docs/REFERENCE.md#devices) for the details.
 
 ## Features
 

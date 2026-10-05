@@ -40,9 +40,9 @@ async function api(path, body) {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && data.needPassword) {
-    showLogin();
-    throw new Error('login required');
+  if (res.status === 401 && data.needApproval) {
+    showPairing();
+    throw new Error('not approved');
   }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
@@ -65,21 +65,73 @@ function writeHash() {
   history.replaceState(null, '', '#' + h.toString());
 }
 
-// ---------- login ----------
+// ---------- device approval ----------
 
-function showLogin() {
+// A browser the host hasn't approved yet shows a code and waits until an
+// approved device or the host's terminal approves it, then reloads.
+let pairTimer = 0;
+const dashed = (code) => `${code.slice(0, 3)}-${code.slice(3)}`;
+
+async function showPairing() {
+  if (!$('login').classList.contains('hidden')) return;
+  for (const d of document.querySelectorAll('dialog[open]')) d.close();
   $('app').classList.add('hidden');
   $('login').classList.remove('hidden');
-  $('password').focus();
+  try {
+    let s = await api('/api/pair');
+    if (s.status === 'none') s = await api('/api/pair', {});
+    renderPairing(s);
+  } catch (err) {
+    pairFailed(err);
+  }
 }
+
+function renderPairing(s) {
+  clearTimeout(pairTimer);
+  if (s.status === 'approved') return location.reload();
+  const waiting = s.status === 'waiting';
+  $('pair-status').textContent = waiting
+    ? 'On a device that already uses agentdeck, approve the request showing this code:'
+    : s.status === 'denied' ? 'This device was denied.'
+    : s.status === 'removed' ? 'This device was removed from agentdeck.'
+    : 'The request expired.';
+  $('pair-code').textContent = waiting ? dashed(s.code) : '';
+  $('pair-code').classList.toggle('hidden', !waiting);
+  $('pair-hint').classList.toggle('hidden', !waiting);
+  $('pair-again').classList.toggle('hidden', waiting);
+  $('pair-password').classList.toggle('hidden', !s.password);
+  if (waiting) pairTimer = setTimeout(checkPairing, 3000);
+}
+
+function pairFailed(err) {
+  $('pair-status').textContent = '';
+  $('pair-again').classList.remove('hidden');
+  $('login-error').textContent = err.message;
+}
+
+async function checkPairing() {
+  try {
+    renderPairing(await api('/api/pair'));
+  } catch {
+    pairTimer = setTimeout(checkPairing, 5000); // the host may be restarting
+  }
+}
+
+$('pair-again').addEventListener('click', async () => {
+  $('login-error').textContent = '';
+  try {
+    renderPairing(await api('/api/pair', {}));
+  } catch (err) {
+    pairFailed(err);
+  }
+});
 
 $('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('login-error').textContent = '';
   try {
     await api('/api/login', { password: $('password').value });
-    $('login').classList.add('hidden');
-    start();
+    location.reload();
   } catch (err) {
     $('login-error').textContent = err.message;
   }
@@ -943,6 +995,8 @@ function scheduleSidebarRefresh() {
 
 function connectEvents() {
   const es = new EventSource('/api/events');
+  // Requests that arrived while the stream was down.
+  es.addEventListener('open', () => loadDevices().catch(() => {}));
   es.onmessage = (e) => {
     const ev = JSON.parse(e.data);
     if (ev.type === 'session_bound') {
@@ -974,6 +1028,10 @@ function connectEvents() {
       scheduleSidebarRefresh();
       return;
     }
+    if (ev.type === 'devices_changed') {
+      loadDevices().catch(() => {});
+      return;
+    }
     if (ev.type === 'status') {
       soundForStatus(ev);
       scheduleSidebarRefresh();
@@ -981,6 +1039,12 @@ function connectEvents() {
     if (ui.key && ev.key === ui.key) handleTurnEvent(ev);
   };
   es.onerror = () => {
+    // Refused rather than dropped, as when this device was removed: api()
+    // then shows the approval screen.
+    if (es.readyState === EventSource.CLOSED) {
+      api('/api/me').catch(() => {});
+      return;
+    }
     // EventSource reconnects on its own; resync the open conversation when it does.
     es.onopen = () => {
       if (ui.key) openConversation(ui.agent, ui.sessionId || ui.key);
@@ -1860,11 +1924,96 @@ $('toggle-usage').addEventListener('click', () => {
   if (!box.classList.contains('hidden')) loadUsage();
 });
 
+// ---------- devices ----------
+
+// Browsers waiting for approval show up as cards on every approved device,
+// and the Devices dialog lists the approved ones.
+let deviceState = { devices: [], waiting: [], current: null };
+const heardCodes = new Set();
+
+async function loadDevices() {
+  deviceState = await api('/api/devices');
+  const fresh = deviceState.waiting.filter((r) => !heardCodes.has(r.code));
+  for (const r of fresh) heardCodes.add(r.code);
+  if (fresh.length) {
+    playChime('ask');
+    announcePending(`${fresh.length === 1 ? 'A new device is' : `${fresh.length} new devices are`} waiting for approval.`);
+  }
+  renderDeviceRequests();
+  if ($('device-dialog').open) renderDevices();
+}
+
+async function deviceAction(path, body) {
+  try {
+    await api(path, body);
+  } catch (err) {
+    if (err.message !== 'not approved') alert(err.message);
+  }
+  loadDevices().catch(() => {});
+}
+
+function renderDeviceRequests() {
+  const box = $('device-requests');
+  box.innerHTML = '';
+  for (const r of deviceState.waiting) {
+    const card = el('div', 'perm');
+    card.setAttribute('role', 'group');
+    card.setAttribute('aria-label', 'New device');
+    card.appendChild(el('div', 'perm-kicker', 'NEW DEVICE'));
+    card.appendChild(el('h4', '', `${r.name}${r.machine ? ' · ' + r.machine : ''} wants to use agentdeck`));
+    card.appendChild(el('div', 'muted', 'Approve it only if this code is showing on the device you are adding:'));
+    card.appendChild(el('div', 'pair-code', dashed(r.code)));
+    const row = el('div', 'row');
+    const allow = el('button', 'primary', 'Approve');
+    allow.onclick = () => deviceAction('/api/devices/approve', { code: r.code });
+    const deny = el('button', 'danger', 'Deny');
+    deny.onclick = () => deviceAction('/api/devices/deny', { code: r.code });
+    row.append(allow, deny);
+    card.appendChild(row);
+    box.appendChild(card);
+  }
+}
+
+function renderDevices() {
+  const list = $('device-list');
+  list.innerHTML = '';
+  for (const d of deviceState.devices) {
+    const me = d.id === deviceState.current;
+    const row = el('div', 'device-row');
+    const text = el('div', 'device-text');
+    text.append(
+      el('div', 'device-name', d.name),
+      el('div', 'muted device-detail', [d.machine, me ? 'this device' : 'used ' + timeAgo(d.lastSeen)].filter(Boolean).join(' · ')),
+    );
+    const rm = el('button', 'danger device-remove', 'Remove');
+    rm.type = 'button';
+    rm.setAttribute('aria-label', `Remove ${d.name}${me ? ' (this device)' : ''}`);
+    rm.onclick = () => {
+      const what = me ? 'this device' : d.name;
+      if (confirm(`Remove ${what}? It will have to be approved again to use agentdeck.`)) deviceAction('/api/devices/revoke', { id: d.id });
+    };
+    row.append(text, rm);
+    list.appendChild(row);
+  }
+}
+
+$('open-devices').addEventListener('click', () => {
+  renderDevices();
+  $('device-dialog').showModal();
+  loadDevices().catch(() => {});
+});
+
+$('device-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  $('device-dialog').close();
+});
+
 // ---------- boot ----------
 
 async function start() {
   const me = await api('/api/me');
   $('app').classList.remove('hidden');
+  loadDevices().catch(() => {}); // a device waiting for approval shouldn't wait for the rest
   $('host').textContent = 'Host: ' + me.host;
   ui.agents = await api('/api/agents');
   const sel = $('agent');
@@ -1882,5 +2031,5 @@ async function start() {
 }
 
 start().catch((err) => {
-  if (err.message !== 'login required') alert(err.message);
+  if (err.message !== 'not approved') alert(err.message);
 });

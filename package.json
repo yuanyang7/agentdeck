@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "Web UI for driving coding-agent conversations (Claude Code, Codex, opencode) on this machine from other devices over Tailscale",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "approve": "node approve.mjs"
   },
   "author": "",
   "license": "MIT",

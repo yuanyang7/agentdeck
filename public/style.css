@@ -68,6 +68,11 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 .login h1 { font-size: 23px; letter-spacing: -.04em; line-height: 1.2; margin: 8px 0 0; }
 .login p { margin: 0 0 10px; }
 .login input, .login button { min-height: 46px; padding: 10px 14px; }
+.login code, .tag-dialog code { white-space: nowrap; font-size: 12px; background: var(--code-bg); padding: 1px 5px; border-radius: 5px; }
+.pair-code { font: 700 30px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; text-align: center; padding: 12px; border-radius: 14px; background: var(--code-bg); }
+.perm .pair-code { display: inline-block; margin-top: 10px; padding: 6px 12px; font-size: 22px; }
+.login .pair-hint { font-size: 12px; margin-top: 4px; }
+.pair-password { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 
 /* Workspace */
 .app { display: flex; width: 100%; height: 100vh; height: 100dvh; overflow: hidden; }
@@ -84,7 +89,9 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 .sidebar-content { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-bottom: 18px; }
 .sidebar-section-title { padding: 20px 25px 9px; display: flex; justify-content: space-between; gap: 8px; }
 .sidebar-section-title span { letter-spacing: 0; text-transform: none; font-weight: 500; }
-.sidebar-foot { border-top: 1px solid var(--border); color: var(--muted); padding: 13px 24px calc(13px + env(safe-area-inset-bottom)); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-foot { border-top: 1px solid var(--border); color: var(--muted); padding: 13px 24px calc(13px + env(safe-area-inset-bottom)); font-size: 11px; display: flex; align-items: center; justify-content: space-between; gap: 10px; white-space: nowrap; }
+#host { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.foot-link { flex: none; margin: 0; padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 11px; font-weight: 650; }
 .workspace-group { margin: 3px 9px 11px; border: 1px solid var(--border); background: color-mix(in srgb, var(--card) 45%, transparent); border-radius: 14px; overflow: hidden; }
 .workspace-heading { width: 100%; border: 0; border-radius: 0; background: transparent; text-align: left; display: flex; flex-direction: column; gap: 1px; padding: 11px 13px; }
 .workspace-heading.selected { background: color-mix(in srgb, var(--accent) 9%, transparent); }
@@ -271,6 +278,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .folder-name { flex: none; font-weight: 650; }
 .folder-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .tag-dialog select { width: 100%; margin-top: 12px; }
+.device-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.device-text { flex: 1; min-width: 0; }
+.device-name { font-weight: 650; }
+.device-detail { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-remove { flex: none; padding: 4px 10px; font-size: 12px; }
 
 @media (max-width: 760px) {
   .sidebar { position: fixed; z-index: 30; inset: 0 auto 0 0; width: min(330px, 87vw); height: 100dvh; transform: translateX(-105%); transition: transform .22s ease; box-shadow: none; }

@@ -7,7 +7,8 @@ Detailed configuration and internals for agentdeck. Start with
 
 | Variable        | Default                     | Meaning                                                      |
 | --------------- | ---------------------------- | ------------------------------------------------------------ |
-| `PASSWORD`      | none                        | Require a password on top of Tailscale.                      |
+| `PASSWORD`      | none                        | A password that approves a browser, besides approval from another [device](#devices). |
+| `ALLOWED_HOSTS` | none                        | `,`-separated extra host names the page may be opened under (see [Devices](#devices)). |
 | `PORT`          | `7878`                      | Port to listen on.                                           |
 | `HOST`          | Tailscale IP, else 127.0.0.1 | Address to bind.                                            |
 | `PROJECT_ROOTS` | `~/code`                    | `:`-separated folders whose subfolders appear as projects.   |
@@ -19,6 +20,57 @@ Detailed configuration and internals for agentdeck. Start with
 ```bash
 PASSWORD='something-long' npm start
 ```
+
+## Devices
+
+Each browser has to be approved once before it can use agentdeck:
+
+1. A browser the host doesn't know gets a random device key in a cookie and
+   shows a six-character code, such as `K7Q-4MD`.
+2. Every approved device shows a **New device** card with the same code, the
+   browser's kind (*Safari on iPhone*) and the tailnet machine it comes from,
+   as Tailscale names it. Approve it only if the code matches the screen of
+   the device you are adding. **Deny** shows that device a denial and an
+   **Ask again** button, which starts over with a new code.
+3. Once approved, the waiting page opens agentdeck by itself.
+
+The first device has no one to approve it, so approve it from a terminal on
+the host:
+
+```bash
+npm run approve              # lists waiting devices; offers to approve if there is one
+npm run approve -- K7Q-4MD   # approves the device showing that code
+```
+
+This talks to the running server on `127.0.0.1` (set `PORT` if you changed
+it) using `~/.agentdeck/host-key`, a random key readable only by your user.
+With `PASSWORD` set, typing it on the waiting page approves that browser too.
+After five wrong passwords from one address, that address can't try again
+for up to ten minutes.
+
+A request lapses after ten minutes, and at most five can wait at once.
+Approved devices are kept in `~/.agentdeck/devices.json`, readable only by
+your user. The file stores a hash of each key, not the key itself, with a
+name, the machine, and when the device was added and last used. The cookie
+lasts 400 days (the most browsers allow) and is renewed on every visit.
+**Devices**, at the bottom of the sidebar, lists approved devices.
+**Remove** cuts that device off at once: its open pages say it was removed,
+with **Ask again** to request approval anew. A web app added to an iPhone home screen has its own cookies, so it
+counts as a separate device. To start over, stop agentdeck, delete
+`devices.json`, and approve again.
+
+agentdeck doesn't treat requests from `localhost` as trusted, because with
+`tailscale serve` every request arrives from there. It also refuses two kinds
+of request that a web page could make through your own browser:
+
+- **Cross-site requests.** A page from another site, or from another port of
+  the same host (a dev server on `localhost:3000`, say), can't call the API.
+  Browsers mark such requests with `Sec-Fetch-Site` (or `Origin`).
+- **DNS rebinding.** A site could point its own domain at this machine to
+  get past the browser's same-origin rule. Only these names are accepted: IP
+  addresses, names without a dot (`localhost`, MagicDNS short names), names
+  under `.ts.net` (MagicDNS, `tailscale serve`) and `.local`. If you reach
+  agentdeck under another name, add it to `ALLOWED_HOSTS`.
 
 ## Agent modes
 
@@ -212,7 +264,7 @@ Larger images are downscaled in the browser before upload. The server only
 serves files with an image extension (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP;
 up to 50 MB), a video extension (MP4, M4V, MOV, WebM) or an audio extension
 (MP3, M4A, AAC, WAV, Ogg, OGA, Opus, FLAC); videos and audio have no size
-limit. It only serves them to signed-in browsers when `PASSWORD` is set.
+limit. It only serves them to approved browsers.
 
 ## Sounds
 
@@ -233,7 +285,9 @@ page wakes the sound up. A page that has only ever been scrolled stays silent.
 
 ## Code layout
 
-- `server.mjs`: HTTP routes, login, projects.
+- `server.mjs`: HTTP routes, device approval checks, projects.
+- `lib/devices.mjs`: approved devices and the requests waiting for approval.
+- `approve.mjs`: `npm run approve`, approving a device from the host's terminal.
 - `lib/hub.mjs`: live conversations, the one-turn lock, permission prompts
   and the event stream every browser listens to. It doesn't depend on the
   agent.
