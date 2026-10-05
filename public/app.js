@@ -988,6 +988,10 @@ function renderQueue() {
     const row = el('div', 'queued');
     row.appendChild(el('div', 'queued-text', m.text || '(image)'));
     if (m.images) row.appendChild(el('span', 'queued-images', `+${m.images} image${m.images === 1 ? '' : 's'}`));
+    const now = el('button', '', 'Send now');
+    now.type = 'button';
+    now.title = 'Stop the current turn and run this message next';
+    now.onclick = () => api('/api/send-now', { key: ui.key, id: m.id }).catch((err) => alert(err.message));
     const edit = el('button', '', 'Edit');
     edit.type = 'button';
     edit.title = 'Take it out of the queue and back into the message box';
@@ -997,7 +1001,7 @@ function renderQueue() {
     remove.title = 'Remove from the queue';
     remove.setAttribute('aria-label', 'Remove from the queue');
     remove.onclick = () => unqueue(m, false);
-    row.append(edit, remove);
+    row.append(now, edit, remove);
     box.appendChild(row);
   }
 }

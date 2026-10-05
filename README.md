@@ -80,8 +80,9 @@ mentions are matched.
 
 One conversation runs one turn at a time. Messages sent while the agent is
 working — from any device — wait in a queue shown above the composer and run
-in order as each turn finishes. A queued message can be edited (taken back
-into the message box) or removed before it starts. **Stop** ends the current
+in order as each turn finishes. A queued message can be sent now (stopping
+the current turn so it runs next), edited (taken back into the message box),
+or removed before it starts. **Stop** ends the current
 turn and clears the queue, putting the queued messages back into the message
 box of the device that pressed it. Permission
 prompts (file edits, shell commands, plan approval, questions) appear on

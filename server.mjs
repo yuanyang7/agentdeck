@@ -392,6 +392,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { text: message.text, images: message.images });
     }
 
+    if (p === '/api/send-now' && req.method === 'POST') {
+      // Stops the running turn and starts this queued message next.
+      const { key, id } = await readJson(req);
+      if (!(await hub.sendNow(key, id))) return send(res, 404, { error: 'That message already started.' });
+      return send(res, 200, { ok: true });
+    }
+
     if (p === '/api/mode' && req.method === 'POST') {
       const { key, mode } = await readJson(req);
       const conv = hub.get(key);
