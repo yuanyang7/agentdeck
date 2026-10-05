@@ -73,7 +73,8 @@ device, but are never written into the agents' own transcripts.
 Attach up to 10 images to a message — click 📎, paste, or drag files onto the
 composer — and images the agent shares back (screenshots, tool output,
 generated images) appear inline too, loaded from the host so every device
-sees them. Click any image to view it full size. See
+sees them. Click any image to view it full size. Videos the agent links or
+names (MP4, MOV, WebM) play inline. See
 [docs/REFERENCE.md](docs/REFERENCE.md#images) for how images and file-name
 mentions are matched.
 
@@ -91,6 +92,25 @@ every connected device, and whichever answers first wins. Avoid keeping the
 same conversation open here and in a terminal, desktop app, or opencode TUI
 at the same time — each keeps its own copy in memory and won't see the
 other's messages.
+
+### Forks
+
+Hover any message you sent and click the fork button beside it to branch the
+conversation: the host copies it, through the end of that exchange, into a
+new conversation of the same agent, which then opens. Forking from the last
+message copies the whole conversation. A branch is one of the agent's own
+sessions, so it resumes in a terminal too, and it starts with the model,
+effort, mode and tags of the chat it came from. The fork button is hidden
+while a turn is running, because the transcript is still being written.
+
+### Sounds
+
+A soft two-note chime plays when a conversation finishes a turn, and a more
+insistent double beep when a permission prompt appears. Both play for every
+conversation on the host, not just the one you have open, so a chat left
+running in another workspace still calls out. The bell button in the header
+mutes them, per device. Browsers only allow sound after you've interacted
+with the page, so the first click or key press after opening arms it.
 
 ## More
 

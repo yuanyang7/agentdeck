@@ -135,6 +135,8 @@ button.tag.on { background: var(--accent); color: var(--accent-text); border-col
 .approval-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: var(--card); font-size: 10px; }
 .usage-button { color: var(--text); font-size: 12px; font-weight: 650; padding: 7px 11px; white-space: nowrap; }
 .usage-button span { color: var(--muted); margin-left: 4px; }
+.sound-button { flex: none; padding: 6px 9px; font-size: 14px; line-height: 1.15; }
+.sound-button.off span { opacity: .55; }
 .messages { flex: 1; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 20px; padding: 30px max(28px, calc((100% - 880px) / 2)) 40px; scrollbar-width: thin; }
 .messages > * { flex: none; min-width: 0; width: 100%; }
 .empty { align-self: center; text-align: center; margin: auto 0; padding: 40px 16px 80px; }
@@ -144,6 +146,14 @@ button.tag.on { background: var(--accent); color: var(--accent-text); border-col
 .empty-project { color: var(--accent); font-weight: 650; }
 .msg-user { align-self: flex-end; width: fit-content; max-width: min(80%, 680px); padding: 12px 16px; border: 1px solid color-mix(in srgb, var(--accent) 9%, var(--border)); border-radius: 17px 17px 5px 17px; background: var(--user); word-wrap: break-word; white-space: normal; }
 .msg-user .msg-text { white-space: pre-wrap; }
+.msg-user-row { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.msg-user-row .msg-user { align-self: auto; }
+/* Forking needs a stored session and a finished turn; see updateForkable. */
+.msg-fork { display: none; flex: none; padding: 4px 7px; font-size: 15px; line-height: 1.2; color: var(--muted); background: transparent; border: 0; opacity: 0; transition: opacity .16s; }
+.can-fork .msg-fork:hover { color: var(--text); }
+.can-fork .msg-fork { display: block; }
+.can-fork .msg-user-row:hover .msg-fork, .can-fork .msg-fork:focus-visible { opacity: 1; }
+@media (hover: none) { .can-fork .msg-fork { opacity: .75; } }
 .msg-assistant { word-wrap: break-word; font-size: 14px; line-height: 1.7; }
 .msg-assistant > :first-child { margin-top: 0; }
 .msg-assistant > :last-child { margin-bottom: 0; }
@@ -176,6 +186,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .img-missing { color: var(--muted); font-size: 12px; font-style: italic; }
 .msg-assistant img { max-width: 100%; max-height: 480px; border-radius: 8px; cursor: zoom-in; }
 .msg-assistant a img { cursor: pointer; }
+.msg-images video, .msg-assistant video { max-width: 100%; max-height: 360px; border-radius: 8px; background: #000; }
 .agent-badge { display: inline-block; font-size: 10px; padding: 1px 6px; margin-right: 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); }
 
 /* Approvals */
@@ -263,6 +274,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   .approval-text { display: none; }
   .approval-short { display: inline; }
   .usage-button { padding: 7px 9px; }
+  .sound-button { padding: 6px 7px; }
   .usage-button span { display: none; }
   .messages { padding: 20px 16px 28px; gap: 17px; }
   .empty { padding-bottom: 50px; }

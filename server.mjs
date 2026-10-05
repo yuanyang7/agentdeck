@@ -204,8 +204,29 @@ const FILE_TYPES = {
   '.svg': 'image/svg+xml',
   '.avif': 'image/avif',
   '.bmp': 'image/bmp',
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
 };
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_IMAGE_FILE_BYTES = 50 * 1024 * 1024; // videos are streamed, so they have no cap
+
+// The byte range a `Range: bytes=a-b` header asks for, or null for the whole
+// file. Throws when the range can't be satisfied.
+function byteRange(header, size) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header || '');
+  if (!m || (!m[1] && !m[2])) return null;
+  let start, end;
+  if (!m[1]) {
+    start = Math.max(0, size - Number(m[2])); // the last N bytes
+    end = size - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  }
+  if (start > end || start >= size) throw new RangeError('Range not satisfiable');
+  return { start, end };
+}
 
 const NAME = /^[\w.\/:@\[\]-]{1,200}$/; // model and effort values
 const SESSION_ID = /^[\w-]+$/;
@@ -296,24 +317,43 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/file' && req.method === 'GET') {
-      // Image files on this machine that an agent showed or linked to.
+      // Image and video files on this machine that an agent showed or linked to.
       const asked = url.searchParams.get('path') || '';
       const file = asked.startsWith('~/') ? path.join(os.homedir(), asked.slice(2)) : asked;
       const type = FILE_TYPES[path.extname(file).toLowerCase()];
-      if (!path.isAbsolute(file) || !type) return send(res, 400, { error: 'Not an image path' });
+      if (!path.isAbsolute(file) || !type) return send(res, 400, { error: 'Not an image or video path' });
       let stat;
       try {
         stat = fs.statSync(file);
       } catch {
         return send(res, 404, { error: 'File not found' });
       }
-      if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return send(res, 404, { error: 'File not found' });
-      return send(res, 200, fs.readFileSync(file), {
+      const video = type.startsWith('video/');
+      if (!stat.isFile() || (!video && stat.size > MAX_IMAGE_FILE_BYTES)) return send(res, 404, { error: 'File not found' });
+      // Players fetch videos in ranges to seek, and Safari won't play one
+      // without them.
+      let range;
+      try {
+        range = byteRange(req.headers.range, stat.size);
+      } catch {
+        return send(res, 416, '', { 'content-range': `bytes */${stat.size}` });
+      }
+      const { start, end } = range || { start: 0, end: stat.size - 1 };
+      res.writeHead(range ? 206 : 200, {
         'content-type': type,
+        'content-length': stat.size ? end - start + 1 : 0,
+        'accept-ranges': 'bytes',
+        ...(range && { 'content-range': `bytes ${start}-${end}/${stat.size}` }),
+        'cache-control': 'no-store',
         'x-content-type-options': 'nosniff',
         // SVG can carry scripts; never let one run on this origin.
         'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
       });
+      if (!stat.size) return res.end();
+      return fs
+        .createReadStream(file, { start, end })
+        .on('error', () => res.destroy())
+        .pipe(res);
     }
 
     if (p === '/api/projects') return send(res, 200, await listProjects());
@@ -419,6 +459,34 @@ const server = http.createServer(async (req, res) => {
       if (mode && !(await backend.options()).modes.some((x) => x.value === mode)) return send(res, 400, { error: 'Bad mode' });
       hub.settingsChanged(agent, sessionId, { model, effort, mode });
       return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/fork' && req.method === 'POST') {
+      // Branches a chat: a copy of it up to the end of one turn, as a new
+      // session of the same agent, which the browser then opens.
+      const { agent = 'claude', sessionId, dir, itemId } = await readJson(req);
+      const backend = await backendFor(agent);
+      if (!backend) return send(res, 400, { error: 'Unknown agent' });
+      if (!backend.fork) return send(res, 400, { error: `${backend.label} cannot fork conversations.` });
+      if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) return send(res, 400, { error: 'Bad session' });
+      if (typeof itemId !== 'string' || !itemId || itemId.length > 200) return send(res, 400, { error: 'Bad message' });
+      if (dir != null && (typeof dir !== 'string' || !fs.existsSync(dir))) return send(res, 400, { error: 'Project folder not found' });
+      // Mid-turn the transcript is incomplete, so the copy would be too.
+      if (hub.find(agent, sessionId)?.running) return send(res, 409, { error: 'Wait for this turn to finish before forking.' });
+      let forked;
+      try {
+        forked = await backend.fork(sessionId, dir || undefined, itemId);
+      } catch (err) {
+        return send(res, 400, { error: String(err?.message || err) });
+      }
+      // The branch continues with the same model, effort and mode, and keeps
+      // the tags of the chat it came from.
+      const settings = settingsOf(agent, sessionId);
+      if (settings) setSettings(agent, forked.sessionId, settings);
+      const tags = tagsOf(agent, sessionId);
+      if (tags.length) setTags(agent, forked.sessionId, tags);
+      hub.broadcast({ type: 'sessions_changed', dir });
+      return send(res, 200, { agent, sessionId: forked.sessionId, whole: !!forked.whole });
     }
 
     if (p === '/api/read' && req.method === 'POST') {

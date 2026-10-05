@@ -523,6 +523,7 @@ async function openConversation(agent, id) {
   // Chats the server knows nothing about show the agent's defaults.
   ui.settings = data.settings || { model: null, effort: null, mode: null };
   fillPickers();
+  updateForkable();
   for (const item of data.items) upsert(item);
   if (data.live) {
     for (const item of data.live.items) upsert(item);
@@ -539,11 +540,11 @@ function md(text) {
   return DOMPurify.sanitize(marked.parse(text || '', { breaks: false, gfm: true }));
 }
 
-// Markdown images that point at files on the host (an absolute path, a
-// file:// URL or a path relative to the project) can't load in another
+// Markdown images and videos that point at files on the host (an absolute
+// path, a file:// URL or a path relative to the project) can't load in another
 // device's browser, so they're fetched through the server instead. This runs
 // before DOMPurify's URL check, which would drop file:// URLs.
-function hostImage(src) {
+function hostFile(src) {
   if (/^(https?:|data:|blob:|\/api\/)/i.test(src)) return src;
   let file = src;
   if (/^file:\/\//i.test(src)) {
@@ -562,15 +563,18 @@ function hostImage(src) {
 }
 
 DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
-  if (node.nodeName === 'IMG' && data.attrName === 'src') data.attrValue = hostImage(data.attrValue.trim());
+  if (/^(IMG|VIDEO|SOURCE)$/.test(node.nodeName) && data.attrName === 'src') data.attrValue = hostFile(data.attrValue.trim());
 });
 
-// Image files a reply mentions by name, e.g. `web-1-entry.png` or
-// /tmp/shots/home.png, get thumbnails under the paragraph or list item that
-// mentions them. Bare names are matched against paths the agent's tools used
-// earlier in the chat; paths with a folder are taken relative to the project.
-const ABSOLUTE_IMAGE = /~?\/[^\s"'`<>()[\]{}|;,\\]*\.(?:png|jpe?g|gif|webp|svg|avif|bmp)\b/gi;
-const MENTIONED_IMAGE = /(?:~\/|\.{0,2}\/)?[\w.@+-]+(?:\/[\w.@+-]+)*\.(?:png|jpe?g|gif|webp|svg|avif|bmp)\b/gi;
+// Image and video files a reply mentions by name, e.g. `web-1-entry.png` or
+// /tmp/shots/demo.mp4, get thumbnails or players under the paragraph or list
+// item that mentions them. Bare names are matched against paths the agent's
+// tools used earlier in the chat; paths with a folder are taken relative to
+// the project.
+const MEDIA_EXT = '(?:png|jpe?g|gif|webp|svg|avif|bmp|mp4|m4v|mov|webm)';
+const ABSOLUTE_IMAGE = new RegExp(`~?/[^\\s"'\`<>()[\\]{}|;,\\\\]*\\.${MEDIA_EXT}\\b`, 'gi');
+const MENTIONED_IMAGE = new RegExp(`(?:~/|\\.{0,2}/)?[\\w.@+-]+(?:/[\\w.@+-]+)*\\.${MEDIA_EXT}\\b`, 'gi');
+const VIDEO_FILE = /\.(?:mp4|m4v|mov|webm)$/i;
 const MAX_MENTIONED = 24;
 
 function rememberImagePaths(item) {
@@ -586,7 +590,7 @@ function resolveMention(name) {
 }
 
 function addMentionedImages(root) {
-  const seen = new Set([...root.querySelectorAll('img')].map((img) => img.getAttribute('src')));
+  const seen = new Set([...root.querySelectorAll('img, video')].map((m) => m.getAttribute('src')));
   const byBlock = new Map();
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node; (node = walker.nextNode()); ) {
@@ -641,31 +645,105 @@ async function openImage(src) {
   if (tab) tab.location.href = URL.createObjectURL(blob);
 }
 
-// Image thumbnails; click to open full size. `quiet` drops images that fail
-// to load instead of saying so (guessed paths may not exist).
+// Whether a src is a video, judged by its file extension (for /api/file
+// URLs, the extension of the host path).
+function isVideo(src) {
+  if (src.startsWith('data:')) return src.startsWith('data:video/');
+  try {
+    const u = new URL(src, location.href);
+    return VIDEO_FILE.test(u.pathname === '/api/file' ? u.searchParams.get('path') || '' : u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+// An inline player. `onMissing` runs if the video can't be loaded.
+function videoEl(src, onMissing) {
+  const v = el('video');
+  v.src = src;
+  v.controls = true;
+  v.playsInline = true;
+  v.preload = 'metadata';
+  v.addEventListener('error', () => onMissing?.(v));
+  return v;
+}
+
+// Image thumbnails and video players; click an image to open it full size.
+// `quiet` drops files that fail to load instead of saying so (guessed paths
+// may not exist).
 function imageRow(images, { quiet = false } = {}) {
   const row = el('div', 'msg-images');
+  const missing = (node, what) => {
+    if (!quiet) return node.replaceWith(el('span', 'img-missing', `${what} not available`));
+    node.remove();
+    if (!row.children.length) row.remove();
+  };
   for (const src of images) {
+    if (isVideo(src)) {
+      row.appendChild(videoEl(src, (v) => missing(v, 'Video')));
+      continue;
+    }
     const img = el('img');
     img.src = src;
     img.alt = '';
     img.addEventListener('click', () => openImage(src));
-    img.addEventListener('error', () => {
-      if (!quiet) return img.replaceWith(el('span', 'img-missing', 'Image not available'));
-      img.remove();
-      if (!row.children.length) row.remove();
-    });
+    img.addEventListener('error', () => missing(img, 'Image'));
     row.appendChild(img);
   }
   return row;
 }
 
-// A user bubble: optional image thumbnails and text.
-function userBubble(text, images) {
+// Branches the conversation: the server copies it up to the end of this
+// exchange into a new session of the same agent, which then opens. The copy
+// is one of the agent's own sessions, so it continues in a terminal too.
+async function forkFrom(itemId, button) {
+  if (!ui.sessionId || ui.running) return;
+  const agent = ui.agent;
+  const from = $('title').textContent;
+  const users = [...ui.items.values()].filter((i) => i.kind === 'user');
+  const last = users[users.length - 1]?.id === itemId;
+  button.disabled = true;
+  try {
+    const forked = await api('/api/fork', { agent, sessionId: ui.sessionId, dir: ui.dir, itemId });
+    await loadProjects();
+    await loadSessions();
+    await openConversation(forked.agent, forked.sessionId);
+    // Agents that can't fork at a point copy the whole conversation; say so
+    // unless the fork was from the last message anyway.
+    const whole = forked.whole && !last ? ` ${agentLabel(agent)} copies a whole conversation, so this one has every message.` : '';
+    upsert({ id: 'fork-' + randomId(), kind: 'notice', text: `Forked from ${from}.${whole}` });
+    scrollToBottom(true);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// Whether the open chat can be forked right now: it has to be a session the
+// agent has stored (not one still starting), the agent has to support it, and
+// a running turn's transcript is incomplete. Drives the fork controls' CSS.
+async function updateForkable() {
+  const agent = ui.agent;
+  const o = agent ? await loadOptions(agent).catch(() => null) : null;
+  if (ui.agent !== agent) return;
+  $('messages').classList.toggle('can-fork', !!(o?.fork && ui.sessionId && !ui.running));
+}
+
+// A user bubble: optional image thumbnails and text, with a fork control
+// beside it.
+function userBubble(id, text, images) {
   const d = el('div', 'msg-user');
   if (images.length) d.appendChild(imageRow(images));
   if (text) d.appendChild(el('div', 'msg-text', text));
-  return d;
+  const row = el('div', 'msg-user-row');
+  const fork = el('button', 'msg-fork', '⑂');
+  fork.type = 'button';
+  fork.title = 'Fork: a new conversation copied up to the end of this exchange';
+  fork.setAttribute('aria-label', 'Fork the conversation from this message');
+  fork.onclick = () => forkFrom(id, fork);
+  row.append(fork, d);
+  return row;
 }
 
 const TOOL_STATE = { running: '…', done: 'done', error: 'error' };
@@ -674,11 +752,16 @@ const TOOL_STATE = { running: '…', done: 'done', error: 'error' };
 function renderItem(item, streaming) {
   switch (item.kind) {
     case 'user':
-      return userBubble(item.text || '', item.images || []);
+      return userBubble(item.id, item.text || '', item.images || []);
     case 'text': {
       const d = el('div', 'msg-assistant');
       d.innerHTML = md(item.text);
       for (const img of d.querySelectorAll('img')) {
+        // ![demo](clip.mp4) plays inline.
+        if (isVideo(img.getAttribute('src') || '')) {
+          img.replaceWith(videoEl(img.getAttribute('src'), (v) => v.replaceWith(el('span', 'img-missing', 'Video not available'))));
+          continue;
+        }
         if (img.closest('a')) continue;
         img.addEventListener('click', () => openImage(img.src));
       }
@@ -821,6 +904,7 @@ function setRunning(running) {
     const d = el('span', 'dot');
     $('status').append(d, document.createTextNode('Working…'));
   }
+  updateForkable();
 }
 
 let sidebarRefreshTimer = 0;
@@ -839,10 +923,12 @@ function connectEvents() {
   es.onmessage = (e) => {
     const ev = JSON.parse(e.data);
     if (ev.type === 'session_bound') {
+      soundKeyBound(ev.oldKey, ev.key);
       if (ui.key === ev.oldKey) {
         ui.key = ev.key;
         ui.sessionId = ev.sessionId;
         writeHash();
+        updateForkable();
       }
       scheduleSidebarRefresh();
       return;
@@ -858,7 +944,10 @@ function connectEvents() {
       scheduleSidebarRefresh();
       return;
     }
-    if (ev.type === 'status') scheduleSidebarRefresh();
+    if (ev.type === 'status') {
+      soundForStatus(ev);
+      scheduleSidebarRefresh();
+    }
     if (ui.key && ev.key === ui.key) handleTurnEvent(ev);
   };
   es.onerror = () => {
@@ -869,6 +958,89 @@ function connectEvents() {
     };
   };
 }
+
+// ---------- notification sounds ----------
+
+// A short chime marks a conversation finishing a turn, and a different one an
+// approval request arriving. Both play for every conversation on the host, not
+// just the open one, so a chat left running in another workspace still calls
+// out. The tones are synthesized, so there's no audio file to load, and the
+// bell button mutes them on this device only.
+const CHIMES = {
+  reply: [[659.25, 0], [987.77, 0.1]], // E5 → B5: a soft "that's done"
+  ask: [[880, 0], [880, 0.18]], // A5 twice: more insistent, needs an answer
+};
+
+let soundOn = localStorage.getItem('cw_sound') !== 'off';
+let audio = null;
+
+// Browsers only let audio start from a user gesture, and suspend the context
+// again when a phone locks or the tab goes to sleep, so every click and
+// keypress wakes it up.
+function unlockAudio() {
+  try {
+    audio ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state !== 'running') audio.resume().catch(() => {});
+  } catch { /* no Web Audio: the page just stays silent */ }
+}
+document.addEventListener('pointerdown', unlockAudio, true);
+document.addEventListener('keydown', unlockAudio, true);
+
+function playChime(kind) {
+  if (!soundOn || audio?.state !== 'running') return;
+  for (const [freq, at] of CHIMES[kind]) {
+    const t = audio.currentTime + at;
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    // Without the ramps the tone clicks as it starts and stops.
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.16, t + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    osc.connect(gain).connect(audio.destination);
+    osc.start(t);
+    osc.stop(t + 0.32);
+  }
+}
+
+// conversation key -> what its last status said, so a sound marks a change
+// rather than every status event.
+const heard = new Map();
+
+// A new conversation's events move from its temp key to the real one.
+function soundKeyBound(oldKey, key) {
+  const was = heard.get(oldKey);
+  heard.delete(oldKey);
+  if (was && !heard.has(key)) heard.set(key, was);
+}
+
+function soundForStatus(ev) {
+  const pending = (ev.pending || []).length;
+  // A key first seen here was already working: it either just started or was
+  // running before this browser connected.
+  const was = heard.get(ev.key) || { running: true, pending: 0 };
+  heard.set(ev.key, { running: !!ev.running, pending });
+  if (pending > was.pending) playChime('ask');
+  else if (was.running && !ev.running) playChime('reply');
+}
+
+function renderSoundButton() {
+  const b = $('toggle-sound');
+  b.firstChild.textContent = soundOn ? '🔔' : '🔕';
+  b.classList.toggle('off', !soundOn);
+  b.setAttribute('aria-pressed', String(soundOn));
+  b.title = soundOn ? 'Notification sound on' : 'Notification sound off';
+  b.setAttribute('aria-label', b.title);
+}
+
+$('toggle-sound').addEventListener('click', () => {
+  soundOn = !soundOn;
+  localStorage.setItem('cw_sound', soundOn ? 'on' : 'off');
+  renderSoundButton();
+  if (soundOn) playChime('reply'); // so you hear what you just turned on
+});
+renderSoundButton();
 
 // ---------- permissions ----------
 

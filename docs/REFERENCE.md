@@ -46,6 +46,27 @@ Tags are saved on the host in `~/.agentdeck/tags.json` (migrated
 automatically from `~/.claude-web/tags.json` if you used an older release),
 so every device sees the same tags and quick tags.
 
+## Forks
+
+Each agent copies a conversation itself, so a branch is one of its own
+sessions and opens in a terminal or desktop app like any other:
+
+- **Claude Code**: the SDK's `forkSession`, cut at the forked turn's last
+  transcript entry. The copy is named after the chat it came from, with
+  `(fork)` appended, and starts without undo history (Claude Code does not
+  copy file-history snapshots into a fork).
+- **Codex**: `thread/fork` with the `lastTurnId` of the forked turn. An
+  app-server too old for a fork point copies the whole thread instead, and
+  the page says so in the new conversation.
+- **opencode**: `POST /session/{id}/fork` with `before` set to the next
+  message, which is opencode's own "copy the history before this message".
+
+The branch also gets the model, effort, permission mode and tags of the chat
+it came from, which are agentdeck's own records rather than the agent's.
+Forking is refused while a turn is running, because the transcript is still
+being written, and a conversation whose project folder no longer exists
+cannot be forked.
+
 ## Images
 
 - Pictures a tool returns, such as Claude reading a PNG, a browser or
@@ -61,10 +82,33 @@ so every device sees the same tags and quick tags.
   agent's tools used earlier in the conversation; a path with a folder is
   taken relative to the project. Names that don't lead to an existing image
   are left as plain text.
+- Videos work the same way: a markdown image pointing at an `.mp4`, `.m4v`,
+  `.mov` or `.webm` file (`![demo](/tmp/demo.mp4)`), or a reply that names
+  one, gets an inline player. The server streams videos with byte ranges, so
+  seeking works and Safari plays them. Whether a format plays depends on the
+  browser (`.mov` is reliable only in Safari).
 
 Larger images are downscaled in the browser before upload. The server only
 serves files with an image extension (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP;
-up to 50 MB), and only to signed-in browsers when `PASSWORD` is set.
+up to 50 MB) or a video extension (MP4, M4V, MOV, WebM; no size limit), and
+only to signed-in browsers when `PASSWORD` is set.
+
+## Sounds
+
+Two chimes, synthesized in the browser (there's no audio file to load):
+
+- A turn finishing: E5 → B5, soft.
+- An approval request arriving: A5 twice, more insistent.
+
+Both follow every conversation the server reports, not just the open one, and
+nothing sounds for streamed text as it arrives or for messages you send. The
+bell button in the header mutes them; the choice is stored per device
+(`cw_sound` in the browser's local storage) and isn't synced like tags or
+model settings are.
+
+Browsers block audio until the page has been interacted with, and suspend it
+again when a phone locks or a tab sleeps, so every click and key press on the
+page wakes the sound up. A page that has only ever been scrolled stays silent.
 
 ## Code layout
 
