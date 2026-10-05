@@ -2,6 +2,12 @@
 
 ## Completed
 
+### 2026-10-05 — Tag view across all workspaces
+
+- Final behavior: A Tags section between Needs attention and Workspaces shows one chip per tag, counted over every workspace. Clicking a chip lists that tag's conversations from all workspaces, newest first, each labeled with its workspace; clicking it again closes the list. `/api/projects` now returns each workspace's tagged chats as `tagged`. The chip row inside an expanded workspace is gone; the global list replaces it.
+- Verification: `node --check` on the server and app script; `/api/projects` on a test instance returned the two `later` chats from demoreel and stock-monitor; headless Chrome showed the `later 2` chip, listed both chats with their workspace names, opened the stock-monitor chat from the list (switched workspace, row highlighted), and closed the list on a second click; screenshot checked.
+- Remaining limitations: One tag at a time; no any/all matching across several tags.
+
 ### 2026-10-04 — Agentdeck icon
 
 - Final behavior: A generated conversation-card icon appears in the README, sidebar, sign-in screen, and new-conversation empty state. The browser tab uses a 64 px PNG favicon, and saved home-screen shortcuts use a 180 px touch icon. All versions are served from the project.

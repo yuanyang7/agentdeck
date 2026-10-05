@@ -16,7 +16,7 @@ const ui = {
   projects: [],
   expandedWorkspace: null,
   shownCount: 0, // chats listed in the expanded workspace; grows by SHOW_MORE_STEP
-  tagFilter: null, // tag the chat list is filtered to, or null
+  tagFilter: null, // tag whose chats the sidebar lists from every workspace, or null
   agents: [], // [{ id, label }] available on the host
   options: new Map(), // agent -> composer options from the server
   items: new Map(), // id -> transcript item (see lib/items.mjs)
@@ -242,23 +242,38 @@ $('tag-form').addEventListener('submit', async (e) => {
   }
 });
 
-function renderTagFilter(box) {
-  const counts = new Map();
-  for (const s of ui.sessions) for (const t of s.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
-  // A filter whose tag no longer exists would hide everything with no way back.
-  if (ui.tagFilter && !counts.has(ui.tagFilter)) ui.tagFilter = null;
+// A chip for every tag in use, counted across all workspaces. Picking one
+// lists that tag's chats from every workspace, newest first.
+function renderTags() {
+  const box = $('tags');
   box.innerHTML = '';
+  const tagged = ui.projects.flatMap((p) => p.tagged || []);
+  const counts = new Map();
+  for (const s of tagged) for (const t of s.tags) counts.set(t, (counts.get(t) || 0) + 1);
+  // A tag removed from its last chat has no chip left to switch it off.
+  if (ui.tagFilter && !counts.has(ui.tagFilter)) ui.tagFilter = null;
   box.classList.toggle('hidden', counts.size === 0);
+  if (!counts.size) return;
+  const title = el('div', 'sidebar-section-title', 'TAGS');
+  title.appendChild(el('span', '', 'All workspaces'));
+  const chips = el('div', 'tag-filter');
   for (const [t, n] of [...counts].sort((a, b) => a[0].localeCompare(b[0]))) {
     const chip = el('button', 'tag' + (t === ui.tagFilter ? ' on' : ''), `${t} ${n}`);
     chip.type = 'button';
+    chip.setAttribute('aria-pressed', t === ui.tagFilter);
     chip.onclick = () => {
       ui.tagFilter = ui.tagFilter === t ? null : t;
-      expandWorkspace(ui.dir);
       renderSessions();
     };
-    box.appendChild(chip);
+    chips.appendChild(chip);
   }
+  box.append(title, chips);
+  if (!ui.tagFilter) return;
+  const list = el('ul', 'sessions');
+  const matching = tagged.filter((s) => s.tags.includes(ui.tagFilter))
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  for (const s of matching) list.appendChild(sessionRow(s, true));
+  box.appendChild(list);
 }
 
 // The sidebar lists a workspace's RECENT_COUNT newest chats (the server's
@@ -285,6 +300,7 @@ function renderSessions() {
     for (const s of needsAttention) list.appendChild(sessionRow(s, true));
     attention.appendChild(list);
   }
+  renderTags();
   for (const p of ui.projects) {
     const section = el('section', 'workspace-group');
     const head = el('button', 'workspace-heading' + (p.dir === ui.dir ? ' selected' : ''));
@@ -312,18 +328,10 @@ function renderSessions() {
     };
     section.appendChild(head);
     const expanded = ui.expandedWorkspace === p.dir && ui.dir === p.dir;
-    if (expanded) {
-      const filter = el('div', 'tag-filter');
-      renderTagFilter(filter);
-      section.appendChild(filter);
-    }
-    const matching = expanded
-      ? ui.sessions.filter((s) => !ui.tagFilter || (s.tags || []).includes(ui.tagFilter))
-      : p.recent;
-    const rows = expanded ? matching.slice(0, ui.shownCount) : [...p.recent];
-    const total = expanded ? matching.length : p.sessions;
+    const rows = expanded ? ui.sessions.slice(0, ui.shownCount) : [...p.recent];
+    const total = expanded ? ui.sessions.length : p.sessions;
     const active = p.dir === ui.dir && ui.sessions.find((s) => s.key === ui.key);
-    if (active && !rows.some((s) => s.key === active.key) && (!expanded || matching.includes(active))) rows.push(active);
+    if (active && !rows.some((s) => s.key === active.key)) rows.push(active);
     const list = el('ul', 'sessions');
     for (const s of rows) list.appendChild(sessionRow(s));
     section.appendChild(list);

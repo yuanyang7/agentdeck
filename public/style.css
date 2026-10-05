@@ -92,8 +92,8 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 .workspace-detail { color: var(--muted); font-size: 11px; }
 .workspace-more-row { display: flex; gap: 14px; margin: 0 12px 11px; }
 .workspace-more { margin: 0; padding: 3px 0; border: 0; background: transparent; color: var(--accent); font-size: 11px; font-weight: 650; }
-.attention-section { padding-bottom: 7px; border-bottom: 1px solid var(--border); }
-.attention-section .sessions { padding-bottom: 0; }
+.attention-section, .tags-section { padding-bottom: 7px; border-bottom: 1px solid var(--border); }
+.attention-section .sessions, .tags-section .sessions { padding-bottom: 0; }
 .sessions { list-style: none; margin: 0; padding: 0 9px 4px; }
 .workspace-group .sessions { padding: 0 5px 5px; }
 .sessions li { position: relative; display: flex; flex-direction: column; gap: 4px; margin: 2px 0; padding: 11px 13px; border-radius: 12px; cursor: pointer; border: 1px solid transparent; }
@@ -109,7 +109,7 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 .dot.decision { background: var(--warn-ink); animation: none; }
 @keyframes pulse { 50% { opacity: .3; } }
 .s-tags, .tag-filter { display: flex; flex-wrap: wrap; gap: 5px; }
-.tag-filter { padding: 0 12px 10px; }
+.tag-filter { padding: 0 22px 10px; }
 .tag { border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--muted); padding: 2px 8px; font-size: 10px; }
 button.tag { cursor: pointer; }
 button.tag.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }

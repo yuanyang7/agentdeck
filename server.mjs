@@ -83,7 +83,7 @@ async function listProjects() {
     for (const e of entries) {
       if (!e.isDirectory() || e.name.startsWith('.')) continue;
       const dir = path.join(root, e.name);
-      byDir.set(dir, { dir, name: e.name, lastModified: 0, sessions: 0, recent: [], attention: [] });
+      byDir.set(dir, { dir, name: e.name, lastModified: 0, sessions: 0, recent: [], attention: [], tagged: [] });
     }
   }
   const agents = await availableBackends();
@@ -95,7 +95,7 @@ async function listProjects() {
     }
     for (const s of r.value) {
       if (!s.dir || !fs.existsSync(s.dir)) continue;
-      const p = byDir.get(s.dir) || { dir: s.dir, name: path.basename(s.dir), lastModified: 0, sessions: 0, recent: [], attention: [] };
+      const p = byDir.get(s.dir) || { dir: s.dir, name: path.basename(s.dir), lastModified: 0, sessions: 0, recent: [], attention: [], tagged: [] };
       const agent = agents[index].id;
       const key = `${agent}:${s.id}`;
       const live = hub.get(key);
@@ -105,6 +105,7 @@ async function listProjects() {
       p.lastModified = Math.max(p.lastModified, s.updatedAt || 0);
       p.recent.push(chat);
       if (chat.pendingCount || chat.unread || chat.running) p.attention.push(chat);
+      if (chat.tags.length) p.tagged.push(chat); // for the sidebar's all-workspace tag view
       byDir.set(s.dir, p);
     }
   }
