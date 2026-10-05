@@ -223,6 +223,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .composer-options::-webkit-scrollbar { display: none; }
 .composer-options select { flex: none; max-width: 170px; min-height: 34px; padding: 5px 8px; border: 1px solid transparent; background: var(--code-bg); color: var(--text); border-radius: 8px; font-size: 11px; }
 .composer-options select:hover { border-color: var(--border); }
+.folders-button { flex: none; max-width: 170px; min-height: 34px; padding: 5px 8px; border: 1px solid transparent; background: var(--code-bg); color: var(--text); border-radius: 8px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.folders-button:hover { border-color: var(--border); }
+.folders-button.on { border-color: var(--accent); }
 .composer-actions { display: flex; align-items: center; flex: none; gap: 6px; }
 #attach { border: 0; background: transparent; color: var(--muted); font-size: 22px; width: 35px; height: 35px; padding: 0; line-height: 1; }
 #attach:hover { color: var(--accent); }
@@ -254,6 +257,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .tag-forget { border: 0; background: transparent; color: var(--muted); padding: 0 4px; font-size: 13px; }
 .tag-forget:hover { color: var(--danger); }
 .tag-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.folder-hint { font-size: 12px; margin: 0 0 12px; }
+.folder-list { display: flex; flex-direction: column; gap: 6px; min-height: 24px; }
+.folder-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.folder-name { flex: none; font-weight: 650; }
+.folder-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.tag-dialog select { width: 100%; margin-top: 12px; }
 
 @media (max-width: 760px) {
   .sidebar { position: fixed; z-index: 30; inset: 0 auto 0 0; width: min(330px, 87vw); height: 100dvh; transform: translateX(-105%); transition: transform .22s ease; box-shadow: none; }

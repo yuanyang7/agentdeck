@@ -75,6 +75,7 @@
             <select id="mode" title="Mode" aria-label="Mode"></select>
             <select id="model" title="Model" aria-label="Model"></select>
             <select id="effort" title="Effort" aria-label="Effort"></select>
+            <button type="button" id="folders" class="folders-button" aria-haspopup="dialog">📁 Folders</button>
           </div>
           <div class="composer-actions">
             <button type="button" id="attach" title="Attach images (or paste / drop them)" aria-label="Attach images">＋</button>
@@ -94,6 +95,18 @@
       <input id="tag-input" type="text" maxlength="30" placeholder="Type a tag and press Enter" autocomplete="off">
       <div class="muted tag-hint">Quick tags (click to add or remove; × forgets one)</div>
       <div id="tag-quick" class="tag-list"></div>
+      <div class="tag-actions">
+        <button type="submit" class="primary">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="folder-dialog" class="tag-dialog">
+    <form method="dialog" id="folder-form">
+      <h2>Folders</h2>
+      <p class="muted folder-hint">Besides <span id="folder-own"></span>, this chat can read and edit these folders without asking for access first. Its mode still decides what needs approval. Changes apply from the next message.</p>
+      <div id="folder-current" class="folder-list"></div>
+      <select id="folder-add" aria-label="Add a folder"></select>
       <div class="tag-actions">
         <button type="submit" class="primary">Done</button>
       </div>

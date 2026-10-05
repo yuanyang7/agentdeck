@@ -18,6 +18,7 @@ import { tagsOf, setTags, quickTags, setQuickTags } from './lib/tags.mjs';
 import { isUnread, markRead } from './lib/reads.mjs';
 import { settingsOf, setSettings } from './lib/chat-settings.mjs';
 import { workspaceIndex, enabled as workspaceIndexEnabled } from './lib/workspace-index.mjs';
+import { rootFolders, checkFolders, mentionedFolders } from './lib/folders.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 7878);
@@ -71,23 +72,20 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-// Every conversation starts with a map of the projects (lib/workspace-index.mjs).
-const hub = new Hub({ instructions: () => workspaceIndex(listProjects, PROJECT_ROOTS) });
+// Every conversation starts with a map of the projects (lib/workspace-index.mjs),
+// and a message naming one of them offers it as an extra folder (lib/folders.mjs).
+const hub = new Hub({
+  instructions: () => workspaceIndex(listProjects, PROJECT_ROOTS),
+  mentions: (text, dir, dirs) => mentionedFolders(text, rootFolders(PROJECT_ROOTS), dir, dirs),
+});
 
 // ---------- projects ----------
 
 async function listProjects() {
   const byDir = new Map();
-  for (const root of PROJECT_ROOTS) {
-    let entries = [];
-    try {
-      entries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {}
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name.startsWith('.')) continue;
-      const dir = path.join(root, e.name);
-      byDir.set(dir, { dir, name: e.name, lastModified: 0, sessions: 0, recent: [], attention: [], tagged: [] });
-    }
+  // `inRoot`: directly under a project root, rather than any folder with chats.
+  for (const { dir, name } of rootFolders(PROJECT_ROOTS)) {
+    byDir.set(dir, { dir, name, inRoot: true, lastModified: 0, sessions: 0, recent: [], attention: [], tagged: [] });
   }
   const agents = await availableBackends();
   const lists = await Promise.allSettled(agents.map((b) => b.listSessions()));
@@ -394,7 +392,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/send' && req.method === 'POST') {
-      const { agent = 'claude', sessionId, key, dir, text = '', images = [], mode, model, effort } = await readJson(req, 80_000_000);
+      const { agent = 'claude', sessionId, key, dir, text = '', images = [], mode, model, effort, dirs } = await readJson(req, 80_000_000);
       const backend = await backendFor(agent);
       if (!backend) return send(res, 400, { error: 'Unknown agent' });
       if (typeof text !== 'string') return send(res, 400, { error: 'Bad message' });
@@ -408,12 +406,15 @@ const server = http.createServer(async (req, res) => {
       if (key != null && (typeof key !== 'string' || !/^new-[\w-]{1,64}$/.test(key))) return send(res, 400, { error: 'Bad key' });
       // Sent while a turn runs, the message waits in the chat's queue.
       const opts = await backend.options();
-      const settings = { mode: mode || opts.defaultMode, model, effort };
-      if (!opts.modes.some((x) => x.value === settings.mode)) return send(res, 400, { error: 'Bad mode' });
+      if (!opts.modes.some((x) => x.value === (mode || opts.defaultMode))) return send(res, 400, { error: 'Bad mode' });
       if (!validName(model) || !validName(effort)) return send(res, 400, { error: 'Bad model or effort' });
-      if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+      if (typeof dir !== 'string' || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
         return send(res, 400, { error: 'Project folder not found' });
       }
+      // A page from before folders were kept sends none: keep the chat's.
+      const folders = checkFolders(dirs === undefined && sessionId ? settingsOf(agent, sessionId)?.dirs : dirs, dir);
+      if (folders.error) return send(res, 400, { error: folders.error });
+      const settings = { mode: mode || opts.defaultMode, model, effort, dirs: folders.dirs };
       try {
         return send(res, 200, { key: hub.start(backend, { sessionId, key, dir, text, images, settings }) });
       } catch (err) {
@@ -462,14 +463,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/settings' && req.method === 'POST') {
-      // The pickers changed in an open chat: remember it for every device.
-      const { agent, sessionId, model, effort, mode } = await readJson(req);
+      // The pickers or folders changed in an open chat: remember it for every
+      // device. `dir` is the chat's own folder.
+      const { agent, sessionId, model, effort, mode, dirs, dir } = await readJson(req);
       const backend = await backendFor(agent);
       if (!backend) return send(res, 400, { error: 'Unknown agent' });
       if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) return send(res, 400, { error: 'Bad session' });
       if (!validName(model) || !validName(effort)) return send(res, 400, { error: 'Bad model or effort' });
       if (mode && !(await backend.options()).modes.some((x) => x.value === mode)) return send(res, 400, { error: 'Bad mode' });
-      hub.settingsChanged(agent, sessionId, { model, effort, mode });
+      const folders = checkFolders(dirs === undefined ? settingsOf(agent, sessionId)?.dirs : dirs, dir);
+      if (folders.error) return send(res, 400, { error: folders.error });
+      hub.settingsChanged(agent, sessionId, { model, effort, mode, dirs: folders.dirs });
       return send(res, 200, { ok: true });
     }
 

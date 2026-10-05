@@ -111,11 +111,24 @@ Every new conversation, with any agent, starts knowing which projects are
 on this machine: each folder under the project roots with its path, the
 opening paragraph of its README, when it was last active and the titles of
 its latest chats from all three agents. Ask about another repo by name and the
-agent knows where to look; reading outside the chat's folder still comes
-up as a permission prompt. Chat titles are often the start of a chat's
-first message, so whatever you typed there goes to the provider of every new
-chat. Set `WORKSPACE_INDEX=off` to turn it off — see
+agent knows where to look, and agentdeck offers to add that repo to the
+chat's folders (see [Folders](#folders)). Chat titles are often the start
+of a chat's first message, so whatever you typed there goes to the provider
+of every new chat. Set `WORKSPACE_INDEX=off` to turn it off — see
 [docs/REFERENCE.md](docs/REFERENCE.md#workspace-index).
+
+### Folders
+
+A chat works in its project folder, and can work in other folders too. The
+📁 button in the composer lists them: pick projects to add, or type any
+folder's path, and remove them with ×. When a message names another project
+under the project roots, by name or path, a prompt asks whether to add it to
+the chat. Each project is asked about once per chat. Allow it and the agent
+can read and edit there without asking for access first, in this and later
+turns. The chat's mode still decides which actions need approval. A chat's
+folders are kept with its model and mode, so every device continues it the
+same way. See [docs/REFERENCE.md](docs/REFERENCE.md#extra-folders) for what
+each agent does with them.
 
 ### Sounds
 

@@ -111,9 +111,49 @@ Chat titles are often the start of a chat's first message (Claude Code and
 Codex fall back to it when a chat has no summary), so the index carries the
 opening words of chats from every project to the provider of each new chat,
 including whatever provider opencode is set up with. Set
-`WORKSPACE_INDEX=off` if that matters. The agent only knows where to look; reading
-a file outside the chat's folder still goes through the usual permission
-prompt.
+`WORKSPACE_INDEX=off` if that matters. The index only tells the agent where
+to look. Access to another project comes from the chat's
+[extra folders](#extra-folders).
+
+## Extra folders
+
+Besides its own folder, a chat can have up to 10 extra folders that the
+agent may read and edit without asking for access first. You can add them in
+two ways:
+
+- **The 📁 button** in the composer, which lists the folders directly under
+  `PROJECT_ROOTS` and also takes any absolute path. In an open chat a
+  change is saved right away and applies from the next message. For a new
+  chat it goes with the first message.
+- **Naming a project in a message.** Before the turn starts, the server
+  looks for the names of folders directly under `PROJECT_ROOTS` in the
+  message. A name only counts as a whole word, so `mini-games` doesn't match
+  inside `mini-games-hub`, and names shorter than three characters are
+  ignored. A path counts too, since it contains the name. If the message
+  names projects the chat can't reach yet, a prompt on every device asks
+  whether to add them, and the turn waits for the answer. Each project is
+  asked about once per chat, and Stop cancels the turn while the prompt is
+  waiting. Allowed folders also go to messages already queued behind it.
+  Nothing is asked in modes that already allow everything (Claude Code's
+  *Bypass permissions*, Codex's *Full access*).
+
+The folders are stored with the chat's model, effort and mode in
+`~/.agentdeck/chat-settings.json`, and forks inherit them. A folder that no
+longer exists stops the chat from sending until it is removed. Each agent
+gets the folders on every turn:
+
+- **Claude Code**: `additionalDirectories`, the SDK's version of `--add-dir`.
+  Reading there needs no approval, and *Auto-accept edits* covers edits
+  there too.
+- **Codex**: extra `writableRoots` in the *Ask before actions* and *Auto*
+  sandboxes. Codex can already read anywhere, so this lets it write there
+  without asking to leave the sandbox. *Read only* stays read-only.
+- **opencode**: an `external_directory` allow rule for each folder (and its
+  resolved path) on the session's permissions. *Ask before actions* still
+  asks before edits and shell commands there.
+
+Folders under `/tmp` don't show a difference for Codex: its sandbox lets it
+write to `/tmp` anyway.
 
 ## Images
 
@@ -173,6 +213,8 @@ page wakes the sound up. A page that has only ever been scrolled stays silent.
   agent.
 - `lib/items.mjs`: the agent-neutral transcript format the page renders.
 - `lib/workspace-index.mjs`: the project map given to agents.
+- `lib/folders.mjs`: a chat's extra folders: checking them and spotting
+  projects a message names.
 - `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,
   `opencode.mjs`). The interface they implement is described in
   `lib/agents/index.mjs`; adding an agent means adding a file there and

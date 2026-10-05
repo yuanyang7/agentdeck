@@ -9,7 +9,8 @@ const ui = {
   sessionId: null,
   running: false,
   mode: null, // mode reported by the live conversation, if any
-  settings: null, // { model, effort, mode } the open chat uses, as stored on the server
+  settings: null, // { model, effort, mode, dirs } the open chat uses, as stored on the server
+  draftDirs: [], // extra folders picked for a new chat before its first message
   pending: [],
   queue: [], // messages waiting for the running turn: [{ id, text, images (count) }]
   sessions: [],
@@ -487,6 +488,8 @@ function newConversation() {
   ui.key = null;
   ui.sessionId = null;
   ui.running = false;
+  ui.draftDirs = [];
+  renderFolders();
   resetView();
   $('messages').innerHTML = '';
   const empty = el('div', 'empty');
@@ -516,6 +519,7 @@ async function openConversation(agent, id) {
   ui.key = temp ? id : `${agent}:${id}`;
   ui.sessionId = temp ? null : id;
   ui.settings = null;
+  renderFolders();
   const key = ui.key;
   resetView();
   selectAgent(agent);
@@ -532,8 +536,9 @@ async function openConversation(agent, id) {
     renderSessions();
   }
   // Chats the server knows nothing about show the agent's defaults.
-  ui.settings = data.settings || { model: null, effort: null, mode: null };
+  ui.settings = data.settings || { model: null, effort: null, mode: null, dirs: [] };
   fillPickers();
+  renderFolders();
   updateForkable();
   for (const item of data.items) upsert(item);
   if (data.live) {
@@ -952,9 +957,16 @@ function connectEvents() {
       return;
     }
     if (ev.type === 'settings_changed') {
-      if (ev.agent === ui.agent && ev.sessionId === ui.sessionId && !samePick(ev.settings, ui.settings)) {
-        ui.settings = ev.settings;
-        fillPickers().then(() => settingsNotice('Now using', 'changed on another device'));
+      if (ev.agent === ui.agent && ev.sessionId === ui.sessionId) {
+        const picks = !samePick(ev.settings, ui.settings);
+        // Folders also change when a folder prompt is answered.
+        const folders = !sameDirs(ev.settings.dirs, ui.settings?.dirs);
+        if (picks || folders) ui.settings = ev.settings;
+        if (picks) fillPickers().then(() => settingsNotice('Now using', 'changed on another device'));
+        if (folders) {
+          renderFolders();
+          folderNotice();
+        }
       }
       return;
     }
@@ -1110,7 +1122,9 @@ function makePendingCard(p) {
     }
     card.appendChild(pre);
     const row = el('div', 'row');
-    const allow = el('button', 'primary', 'Allow');
+    // `choice` gives a yes/no question its own labels, with nothing to tell
+    // the agent on "no".
+    const allow = el('button', 'primary', p.choice?.allow || 'Allow');
     allow.onclick = () => answer(p, { allow: true });
     row.appendChild(allow);
     if (p.canAlways) {
@@ -1118,8 +1132,9 @@ function makePendingCard(p) {
       always.onclick = () => answer(p, { allow: true, always: true });
       row.appendChild(always);
     }
-    const deny = el('button', 'danger', 'Deny');
+    const deny = el('button', p.choice ? '' : 'danger', p.choice?.deny || 'Deny');
     deny.onclick = () => {
+      if (p.choice) return answer(p, { allow: false });
       const why = prompt(`Tell ${agentLabel(ui.agent)} what to do instead (optional):`) ?? null;
       if (why === null) return;
       answer(p, { allow: false, message: why || undefined });
@@ -1310,7 +1325,7 @@ function picked() {
 
 const PICKS = ['model', 'effort', 'mode'];
 const samePick = (a, b) => PICKS.every((k) => (a?.[k] || null) === (b?.[k] || null));
-const currentPick = () => ({ model: $('model').value || null, effort: $('effort').value || null, mode: $('mode').value || null });
+const currentPick = () => ({ model: $('model').value || null, effort: $('effort').value || null, mode: $('mode').value || null, dirs: chatDirs() });
 
 async function fillPickers() {
   const agent = ui.agent;
@@ -1360,7 +1375,7 @@ async function pickChanged(before = ui.settings) {
   ui.settings = next;
   settingsNotice('Switched to', next.mode === before?.mode ? 'from the next message' : 'mode applies now');
   if (ui.sessionId) {
-    api('/api/settings', { agent: ui.agent, sessionId: ui.sessionId, ...next }).catch((err) => alert(err.message));
+    api('/api/settings', { agent: ui.agent, sessionId: ui.sessionId, dir: ui.dir, ...next }).catch((err) => alert(err.message));
   }
 }
 
@@ -1372,6 +1387,92 @@ function settingsNotice(prefix, suffix) {
   parts.push(label('mode'));
   upsert({ id: 'settings-' + randomId(), kind: 'notice', text: `${prefix} ${parts.filter(Boolean).join(' · ')} (${suffix})` });
 }
+
+// ---------- folders ----------
+
+// Folders the chat may work in besides its own (see lib/folders.mjs). An open
+// chat keeps them with its settings on the server; a new chat starts with
+// none, plus any picked before its first message. A message naming another
+// project also offers to add it, as a prompt on the server's side.
+const chatDirs = () => (ui.key ? ui.settings?.dirs : ui.draftDirs) || [];
+const folderName = (d) => d.split('/').filter(Boolean).pop() || d;
+const sameDirs = (a, b) => (a || []).join('\n') === (b || []).join('\n');
+
+function renderFolders() {
+  const dirs = chatDirs();
+  const b = $('folders');
+  b.textContent = dirs.length ? `📁 ${folderName(dirs[0])}${dirs.length > 1 ? ` +${dirs.length - 1}` : ''}` : '📁 Folders';
+  b.classList.toggle('on', dirs.length > 0);
+  b.title = dirs.length ? `Also works in:\n${dirs.join('\n')}` : 'Let this chat work in other folders too';
+  if ($('folder-dialog').open) renderFolderEditor();
+}
+
+function renderFolderEditor() {
+  const dirs = chatDirs();
+  $('folder-own').textContent = ui.dir ? folderName(ui.dir) : 'its own folder';
+  const cur = $('folder-current');
+  cur.innerHTML = '';
+  if (!dirs.length) cur.appendChild(el('span', 'muted', 'No other folders yet'));
+  for (const d of dirs) {
+    const row = el('div', 'folder-row');
+    const rm = el('button', 'tag-forget', '×');
+    rm.type = 'button';
+    rm.title = 'Remove';
+    rm.setAttribute('aria-label', `Remove ${folderName(d)}`);
+    rm.onclick = () => setDirs(dirs.filter((x) => x !== d));
+    row.append(el('span', 'folder-name', folderName(d)), el('span', 'muted folder-path', d), rm);
+    cur.appendChild(row);
+  }
+  // The projects under the project roots; any other folder by path.
+  const projects = ui.projects.filter((p) => p.inRoot && p.dir !== ui.dir && !dirs.includes(p.dir));
+  fillSelect($('folder-add'), [['', 'Add a project…'], ...projects.map((p) => [p.dir, p.name]), ['__other__', 'Other folder…']], '');
+}
+
+// A transcript line, so a change is never silent.
+function folderNotice(suffix) {
+  const dirs = chatDirs();
+  const text = dirs.length ? `Also working in ${dirs.map(folderName).join(', ')}` : `Working in ${folderName(ui.dir || '')} only`;
+  upsert({ id: 'folders-' + randomId(), kind: 'notice', text: suffix ? `${text} (${suffix})` : text });
+}
+
+// Applies from the next message. In an open chat it is saved for the chat
+// right away, like the pickers, and put back if the server refuses it.
+function setDirs(dirs) {
+  if (!ui.key) {
+    ui.draftDirs = dirs;
+    renderFolders();
+    return;
+  }
+  const before = ui.settings;
+  ui.settings = { ...ui.settings, dirs };
+  renderFolders();
+  folderNotice('from the next message');
+  if (!ui.sessionId) return;
+  api('/api/settings', { agent: ui.agent, sessionId: ui.sessionId, dir: ui.dir, ...currentPick() }).catch((err) => {
+    alert(err.message);
+    if (ui.settings?.dirs === dirs) {
+      ui.settings = before;
+      renderFolders();
+    }
+  });
+}
+
+$('folders').addEventListener('click', () => {
+  renderFolderEditor();
+  $('folder-dialog').showModal();
+});
+
+$('folder-add').addEventListener('change', () => {
+  let d = $('folder-add').value;
+  if (d === '__other__') d = prompt('Absolute path of the folder on the host:', '')?.trim().replace(/(.)\/+$/, '$1');
+  if (d && d !== ui.dir && !chatDirs().includes(d)) setDirs([...chatDirs(), d]);
+  else renderFolderEditor();
+});
+
+$('folder-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  $('folder-dialog').close();
+});
 
 $('model').addEventListener('change', async () => {
   const before = ui.settings;
@@ -1506,10 +1607,11 @@ $('composer').addEventListener('submit', async (e) => {
   $('send').disabled = true;
   const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
   const isNew = !ui.key;
+  const dirs = chatDirs();
   if (isNew) {
     // Our own temp key, so events sent before the reply already reach us.
     ui.key = 'new-' + randomId();
-    ui.settings = currentPick();
+    ui.settings = { ...currentPick(), dirs };
     $('agent').disabled = true;
     $('title').textContent = text.split('\n')[0].slice(0, 80) || '(image)';
   }
@@ -1525,6 +1627,7 @@ $('composer').addEventListener('submit', async (e) => {
       mode: $('mode').value,
       model: $('model').value || undefined,
       effort: $('effort').value || undefined,
+      dirs,
     });
     if (isNew) loadSessions();
     setRunning(true);
