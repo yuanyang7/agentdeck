@@ -272,6 +272,15 @@ up to 50 MB), a video extension (MP4, M4V, MOV, WebM) or an audio extension
 (MP3, M4A, AAC, WAV, Ogg, OGA, Opus, FLAC); videos and audio have no size
 limit. It only serves them to approved browsers.
 
+## Files
+
+A file dropped or picked in the composer that isn't an image (or any file,
+for an agent that can't take images) is uploaded to
+`~/.agentdeck/uploads/<random>/<name>` on the host, and that path is inserted
+at the cursor. Characters other than letters, digits and `._@+-` in the name
+become `_`, so the path never needs quoting. Each file can be up to 500 MB.
+Folders can't be dropped. Uploads are kept until you delete them.
+
 ## Sounds
 
 Two chimes, synthesized in the browser (there's no audio file to load):

@@ -1381,7 +1381,6 @@ async function selectAgent(agent) {
   $('status').removeAttribute('role');
   if (!ui.running) $('status').textContent = '';
   fillPickers();
-  $('attach').classList.toggle('hidden', !o.images);
   $('toggle-usage').classList.toggle('hidden', !o.usage);
   if (!o.usage) $('usage').classList.add('hidden');
   else if (!$('usage').classList.contains('hidden')) loadUsage();
@@ -1792,8 +1791,37 @@ async function prepareImage(file) {
   return { mediaType: 'image/jpeg', data: (await readAsDataUrl(out)).split(',')[1] };
 }
 
+// Puts `text` at the cursor, with a space on either side where needed.
+function insertAtCursor(text) {
+  const { selectionStart: a, selectionEnd: b, value } = input;
+  const before = a && !/\s$/.test(value.slice(0, a)) ? ' ' : '';
+  const after = /^\s/.test(value.slice(b)) ? '' : ' ';
+  input.setRangeText(before + text + after, a, b, 'end');
+  input.dispatchEvent(new Event('input'));
+}
+
+// Copies a file to the host and puts its path there in the message.
+async function uploadFile(file) {
+  const placeholder = `[uploading ${file.name}…]`;
+  insertAtCursor(placeholder);
+  try {
+    const res = await fetch('/api/upload?name=' + encodeURIComponent(file.name), { method: 'POST', body: file });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    input.value = input.value.replace(placeholder, data.path);
+  } catch (err) {
+    input.value = input.value.replace(placeholder + ' ', '').replace(placeholder, '');
+    alert(`Couldn't upload ${file.name}: ${err.message}`);
+  }
+  input.dispatchEvent(new Event('input'));
+}
+
+// Images become attachments; any other file, or an image for an agent that
+// can't take them, is uploaded and named by path.
 async function addFiles(files) {
-  const images = [...files].filter((f) => f.type.startsWith('image/'));
+  files = [...files];
+  const images = (await ui.options.get(ui.agent)?.catch(() => null))?.images ? files.filter((f) => f.type.startsWith('image/')) : [];
+  await Promise.all(files.filter((f) => !images.includes(f)).map(uploadFile));
   for (const f of images) {
     if (attachments.length >= MAX_ATTACH) {
       alert(`At most ${MAX_ATTACH} images per message.`);
@@ -1831,7 +1859,10 @@ $('composer').addEventListener('drop', (e) => {
   $('composer').classList.remove('drag');
   if (e.dataTransfer?.files?.length) {
     e.preventDefault();
-    addFiles(e.dataTransfer.files);
+    // Folders show up as files too, but can't be read.
+    const folders = [...e.dataTransfer.items].filter((i) => i.webkitGetAsEntry?.()?.isDirectory).map((i) => i.getAsFile()?.name);
+    if (folders.length) alert(`Folders can't be dropped: ${folders.join(', ')}`);
+    addFiles([...e.dataTransfer.files].filter((f) => !folders.includes(f.name)));
   }
 });
 $('composer').addEventListener('submit', async (e) => {

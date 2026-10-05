@@ -13,6 +13,8 @@ import crypto from 'node:crypto';
 import net from 'node:net';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { Hub, BusyError } from './lib/hub.mjs';
 import { backends, availableBackends } from './lib/agents/index.mjs';
@@ -391,6 +393,9 @@ const FILE_TYPES = {
 };
 const MAX_IMAGE_FILE_BYTES = 50 * 1024 * 1024; // videos and audio are streamed, so they have no cap
 
+const UPLOADS = path.join(os.homedir(), '.agentdeck', 'uploads');
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+
 // The byte range a `Range: bytes=a-b` header asks for, or null for the whole
 // file. Throws when the range can't be satisfied.
 function byteRange(header, size) {
@@ -656,6 +661,34 @@ const server = http.createServer(async (req, res) => {
         .createReadStream(file, { start, end })
         .on('error', () => res.destroy())
         .pipe(res);
+    }
+
+    if (p === '/api/upload' && req.method === 'POST') {
+      // A file dropped or picked in the composer. A browser never tells the
+      // page where a file lives, and it may be on another device, so the file
+      // is copied to the host and the message refers to it by that path.
+      const name = path.basename(url.searchParams.get('name') || '').replace(/[^\p{L}\p{N}._@+-]/gu, '_').replace(/^\.+/, '') || 'file';
+      const dir = path.join(UPLOADS, crypto.randomBytes(4).toString('hex'));
+      const file = path.join(dir, name.slice(-120));
+      if (Number(req.headers['content-length']) > MAX_UPLOAD_BYTES) return send(res, 413, { error: 'File too large (max 500 MB)' });
+      fs.mkdirSync(dir, { recursive: true });
+      let size = 0;
+      try {
+        await pipeline(
+          req,
+          new Transform({
+            transform(chunk, _, done) {
+              size += chunk.length;
+              done(size > MAX_UPLOAD_BYTES ? new Error('File too large (max 500 MB)') : null, chunk);
+            },
+          }),
+          fs.createWriteStream(file),
+        );
+      } catch (err) {
+        fs.rmSync(dir, { recursive: true, force: true });
+        return send(res, 413, { error: err.message });
+      }
+      return send(res, 200, { path: file });
     }
 
     if (p === '/api/projects') return send(res, 200, await listProjects());

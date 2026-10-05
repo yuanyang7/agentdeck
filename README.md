@@ -107,6 +107,13 @@ a tool play inline. See
 [docs/REFERENCE.md](docs/REFERENCE.md#images) for how images and file-name
 mentions are matched.
 
+### Files
+
+Drop any other file onto the composer (or pick it with ＋) and it's copied to
+the host, and its path there is put into your message, so the agent can read
+it. This works from any device, since a browser never tells the page where a
+dropped file lives. See [docs/REFERENCE.md](docs/REFERENCE.md#files).
+
 ### Turns
 
 One conversation runs one turn at a time. Messages sent while the agent is
