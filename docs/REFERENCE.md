@@ -90,8 +90,10 @@ The mode, model and effort menus show what the chosen agent offers:
   levels are the ones your Codex login offers, and **Usage** shows the
   plan's Codex limits.
 - **opencode**: *Ask before actions* runs opencode's `build` agent but asks
-  before file edits and shell commands; the other modes are opencode's own
-  agents (`build`, `plan`, …) with the permissions configured for them.
+  before file edits and shell commands. *Auto* runs `build` and automatically
+  approves permission requests unless opencode explicitly denies them. The
+  other modes are opencode's own agents (`build`, `plan`, …) with their
+  configured permissions.
   Models are the ones from opencode's connected providers, and effort lists
   the selected model's variants.
 

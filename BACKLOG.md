@@ -2,6 +2,12 @@
 
 ## Completed
 
+### 2026-10-05 — Add OpenCode Auto permission mode
+
+- Final behavior: The OpenCode mode picker includes Auto. It runs the Build agent and replies once to permission requests that OpenCode surfaces; explicit denials stay blocked, and forms/questions still go to the user. Switching to or from Auto during setup or a turn updates the session and how later permission requests are handled.
+- Verification: Compared OpenCode's documented Auto semantics and built-in primary agents with the adapter's agent list and permission event/reply flow. No live auto-approval run was performed.
+- Remaining limitations: OpenCode's automatic permission mode is not a separate agent, so Auto uses Build. Requests for user input remain interactive.
+
 ### 2026-10-05 — Identify OpenCode Go models
 
 - Final behavior: The opencode model picker prefixes models from the `opencode-go` provider with `Go ·`, including the default-model label when applicable. Models from the regular `opencode` provider keep their names, so identical model names from the two providers are distinguishable.
