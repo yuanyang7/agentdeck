@@ -1,3 +1,5 @@
+<img src="public/agentdeck-icon.png" alt="Agentdeck icon" width="72" height="72">
+
 # agentdeck
 
 A small web page for driving coding-agent conversations (Claude Code, Codex

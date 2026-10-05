@@ -2,6 +2,12 @@
 
 ## Completed
 
+### 2026-10-04 — Agentdeck icon
+
+- Final behavior: A generated conversation-card icon appears in the README, sidebar, sign-in screen, and new-conversation empty state. The browser tab uses a 64 px PNG favicon, and saved home-screen shortcuts use a 180 px touch icon. All versions are served from the project.
+- Verification: Inspected the generated icon and its 64 px version; confirmed the PNG dimensions; `node --check` for the server and app script; `git diff --check`; local HTTP GETs returned 200 with `image/png` for all three assets. An adversarial review flagged edge artifacts in an earlier transparent draft, which were resolved by generating the final opaque icon.
+- Remaining limitations: No browser screenshot was captured because the available browser automation had no browser connection.
+
 ### 2026-10-03 — Images shared by agents
 
 - Final behavior: Tool items carry an `images` list, shown as thumbnails below the tool card (visible while it is collapsed). Sources: image blocks in Claude tool results (Read, MCP screenshot tools), Codex `imageView`, `imageGeneration`, MCP and dynamic tool images, and opencode tool file attachments. Markdown images in replies that reference host files (absolute path, `file://`, or project-relative) are rewritten to `/api/file`, which serves image-extension files only, with `nosniff` and a sandboxing CSP for SVG. Clicking an image opens it full size, including data URLs (opened through a blob URL); images that fail to load show "Image not available".

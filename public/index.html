@@ -5,12 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f7f8fb">
   <title>Agentdeck</title>
+  <link rel="icon" type="image/png" href="/favicon.png" sizes="64x64">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <div id="login" class="login hidden">
     <form id="login-form">
-      <div class="login-mark" aria-hidden="true">✳</div>
+      <img class="login-mark" src="/agentdeck-icon.png" alt="">
       <h1>Welcome to Agentdeck</h1>
       <p class="muted">Your coding conversations, in one place.</p>
       <input id="password" type="password" placeholder="Password" autocomplete="current-password" autofocus>
@@ -24,7 +26,7 @@
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-head">
         <div class="brand-row">
-          <div class="brand"><span class="brand-mark" aria-hidden="true">✳</span><span>agentdeck</span></div>
+          <div class="brand"><img class="brand-mark" src="/agentdeck-icon.png" alt=""><span>agentdeck</span></div>
           <button id="close-sidebar" class="icon close-sidebar" type="button" aria-label="Close conversations">×</button>
         </div>
         <label class="sidebar-label" for="project">WORKSPACE</label>

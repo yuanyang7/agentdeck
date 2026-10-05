@@ -132,6 +132,9 @@ const STATIC = {
   '/': ['public/index.html', 'text/html; charset=utf-8'],
   '/app.js': ['public/app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['public/style.css', 'text/css; charset=utf-8'],
+  '/agentdeck-icon.png': ['public/agentdeck-icon.png', 'image/png'],
+  '/favicon.png': ['public/favicon.png', 'image/png'],
+  '/apple-touch-icon.png': ['public/apple-touch-icon.png', 'image/png'],
   '/vendor/marked.js': ['node_modules/marked/lib/marked.umd.js', 'text/javascript; charset=utf-8'],
   '/vendor/purify.js': ['node_modules/dompurify/dist/purify.js', 'text/javascript; charset=utf-8'],
 };

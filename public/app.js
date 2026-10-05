@@ -360,7 +360,10 @@ function newConversation() {
   resetView();
   $('messages').innerHTML = '';
   const empty = el('div', 'empty');
-  empty.appendChild(el('div', 'empty-mark', '✳'));
+  const mark = el('img', 'empty-mark');
+  mark.src = '/agentdeck-icon.png';
+  mark.alt = '';
+  empty.appendChild(mark);
   empty.appendChild(el('h2', '', 'What are we building today?'));
   const intro = el('p');
   intro.append('Start a conversation in ');
