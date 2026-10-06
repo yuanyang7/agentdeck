@@ -1064,7 +1064,8 @@ const server = http.createServer(async (req, res) => {
       const conv = hub.find(agent, sessionId);
       if (conv?.running) return send(res, 409, { error: 'Wait for this turn to finish before moving the chat.' });
       // Another app writing the chat would keep writing to the old place.
-      if (backend.working && (await backend.working().catch(() => [])).includes(sessionId)) {
+      const working = backend.working ? await Promise.resolve().then(() => backend.working()).catch(() => []) : [];
+      if (working.includes(sessionId)) {
         return send(res, 409, { error: 'This chat is working in another app. Wait for it to finish before moving it.' });
       }
       const backup = path.join(MOVED, new Date().toISOString().replace(/[:.]/g, '-'));
