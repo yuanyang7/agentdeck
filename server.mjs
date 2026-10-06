@@ -339,9 +339,11 @@ function sameFolder(a, b) {
 
 // A chat is running when agentdeck runs a turn in it, or when a backend sees
 // it mid-turn in another app (`elsewhere`: no Stop, no live items here).
+// `stopped`: its last turn was cut off before it finished.
 function runState(s, live) {
-  const elsewhere = !live?.running && !!s.working;
-  return { working: undefined, running: !!live?.running || elsewhere, elsewhere };
+  const running = !!live?.running;
+  const elsewhere = !running && s.turn === 'working';
+  return { turn: undefined, running: running || elsewhere, elsewhere, stopped: !running && s.turn === 'stopped' };
 }
 
 // Chats working in other apps change without agentdeck hearing of it, so the
@@ -879,7 +881,9 @@ const server = http.createServer(async (req, res) => {
       const dir = url.searchParams.get('dir') || undefined;
       // `id` is a session id, or a temp key while a new conversation starts.
       const conv = hub.get(id) || hub.find(agent, id);
-      const items = conv && !conv.sessionId ? [] : await backend.history(conv?.sessionId || id, dir);
+      let items = conv && !conv.sessionId ? [] : await backend.history(conv?.sessionId || id, dir);
+      // A turn quiet for a long while reads as cut off; not while it runs here.
+      if (conv?.running) items = items.filter((it) => !it.id?.startsWith?.('stopped-'));
       // While a turn is running the history may lag; the browser merges the
       // live items on top by id.
       // Opening a chat counts as reading it. `id` may be a temp key of a

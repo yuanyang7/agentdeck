@@ -458,7 +458,7 @@ function sessionRow(s, showWorkspace = false) {
     const meta = el('div', 's-meta');
     if (ui.agents.length > 1) meta.appendChild(el('span', 'agent-badge', agentLabel(s.agent)));
     meta.appendChild(document.createTextNode([showWorkspace && ui.projects.find((p) => p.dir === s.dir)?.name,
-      s.pendingCount ? 'Needs decision' : s.elsewhere ? 'Working in another app' : s.running ? 'Working' : s.unread ? 'Finished · unread' : null,
+      s.pendingCount ? 'Needs decision' : s.elsewhere ? 'Working in another app' : s.running ? 'Working' : s.unread ? 'Finished · unread' : s.stopped ? 'Stopped mid-turn' : null,
       timeAgo(s.updatedAt), s.branch].filter(Boolean).join(' · ')));
     li.append(t, meta);
     if (s.tags?.length) {
