@@ -179,6 +179,40 @@ Forking is refused while a turn is running, because the transcript is still
 being written, and a conversation whose project folder no longer exists
 cannot be forked.
 
+## Moving a chat
+
+`POST /api/move { agent, sessionId, dir, to, confirmed: true }` moves a chat
+from its folder `dir` to the existing folder `to`. It only runs on the user's
+say-so: the page's dialog names the chat and both folders and sends
+`confirmed` when Move is pressed, and the server refuses a request without
+it. Nothing moves a chat on its own. It is also refused while a turn is
+running, here or (as far as the agent can tell) in another app. Every agent keeps a chat's folder in its own store, so each moves it
+its own way:
+
+- **Claude Code** looks a chat up only in the project folder named after its
+  folder (`~/.claude/projects/<path with dashes>`), so the transcript moves
+  there with the folder in each entry rewritten to `to`, and the folder of
+  subagent transcripts and tool results beside it goes along. A copy of the
+  transcript as it was is kept in `~/.agentdeck/moved/<time>/` first. The id
+  stays the same.
+- **Codex** indexes a rollout file by byte offset, so the file can't be
+  edited (an edited rollout stops saving new turns). The chat is forked with
+  `thread/fork` and the new `cwd`, which keeps the whole history, and the
+  original is archived with `thread/archive`, which the Codex app can undo.
+  The moved chat has a new id; its tags and settings go with it. Codex lists
+  a fork only once a message is sent in it, so until then agentdeck lists it
+  from `~/.agentdeck/codex-moved.json`.
+- **opencode** moves a session itself: `POST /session/{id}/move` with the new
+  directory. The id stays the same.
+
+After a turn, any folder directly under the project roots made since the
+turn started (other than the chat's own) comes back in the chat's status as
+`created`, and the page shows a card offering to move the chat there, which
+opens the same dialog. A move is broadcast as `chat_moved`, so other pages
+with the chat open follow it to its new workspace. Files the chat already
+made stay where they are, and a chat open in a terminal or desktop app at
+the same time keeps writing where it was.
+
 ## Workspace index
 
 When agentdeck starts a new conversation, it gives the agent a short map of

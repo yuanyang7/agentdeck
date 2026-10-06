@@ -54,7 +54,7 @@
         <div class="title">
           <div class="topbar-eyebrow">WORKSPACE CHAT</div>
           <div id="title">New conversation</div>
-          <div id="subtitle" class="muted"></div>
+          <div class="subtitle-row"><span id="subtitle" class="muted"></span><button id="move-chat" class="move-chat hidden" type="button" title="Move this chat to another workspace">Move…</button></div>
         </div>
         <div id="project-bar" class="project-bar hidden" role="group" aria-label="Project">
           <span class="project-bar-label"><span class="hub-dot" aria-hidden="true"></span><span class="hub-name"></span></span>
@@ -151,6 +151,20 @@
       <select id="folder-add" aria-label="Add a folder"></select>
       <div class="tag-actions">
         <button type="submit" class="primary">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="move-dialog" class="tag-dialog">
+    <form method="dialog" id="move-form">
+      <h2>Move to workspace</h2>
+      <p class="muted folder-hint">The chat keeps its history, tags and settings. It is listed under the new workspace and its next message runs there. Files it already made stay where they are.</p>
+      <select id="move-to" aria-label="New workspace"></select>
+      <p id="move-confirm" class="move-confirm hidden"></p>
+      <p id="move-error" class="error"></p>
+      <div class="tag-actions">
+        <button type="button" id="move-cancel">Cancel</button>
+        <button type="submit" class="primary" id="move-submit" disabled>Move</button>
       </div>
     </form>
   </dialog>

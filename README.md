@@ -142,6 +142,18 @@ sessions, so it resumes in a terminal too, and it starts with the model,
 effort, mode and tags of the chat it came from. The fork button is hidden
 while a turn is running, because the transcript is still being written.
 
+### Moving a chat
+
+A chat that ended up in the wrong workspace, or that started under `~/code`
+and made a new repo there, can move. **Move…** next to the folder under the
+chat's title opens a dialog: pick a workspace or type a folder, read what
+goes where, and press Move. The chat keeps its history, tags and settings,
+is listed under the new workspace, and its next message runs there. When a
+turn makes a new folder under the project roots, a card offers to move the
+chat to it; nothing moves until you confirm. Move is hidden while a turn is
+running. How each agent does it is in
+[docs/REFERENCE.md](docs/REFERENCE.md#moving-a-chat).
+
 ### Workspace index
 
 Every new conversation, with any agent, starts knowing which projects are

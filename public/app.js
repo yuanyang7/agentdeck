@@ -565,6 +565,7 @@ document.addEventListener('keydown', (e) => {
 // ---------- conversation ----------
 
 function resetView() {
+  forgetMoveOffers();
   $('messages').innerHTML = '';
   ui.items.clear();
   ui.els.clear();
@@ -852,10 +853,131 @@ async function forkFrom(itemId, button) {
 // agent has stored (not one still starting), the agent has to support it, and
 // a running turn's transcript is incomplete. Drives the fork controls' CSS.
 async function updateForkable() {
+  // Moving has the same conditions, minus the agent's options.
+  $('move-chat').classList.toggle('hidden', !(ui.sessionId && !ui.running && ui.agents.find((a) => a.id === ui.agent)?.move));
   const agent = ui.agent;
   const o = agent ? await loadOptions(agent).catch(() => null) : null;
   if (ui.agent !== agent) return;
   $('messages').classList.toggle('can-fork', !!(o?.fork && ui.sessionId && !ui.running));
+}
+
+// ---------- moving a chat ----------
+
+// Moving a chat to another workspace: the dialog shows exactly what moves
+// where, and only its Move button sends the request, so a chat never moves
+// without the user agreeing to it. `suggested` preselects a folder (a
+// project the chat just made).
+const mover = { chat: null };
+
+function openMoveDialog(suggested) {
+  if (!ui.sessionId || ui.running) return;
+  mover.chat = { agent: ui.agent, sessionId: ui.sessionId, key: ui.key, dir: ui.dir, title: $('title').textContent };
+  const projects = ui.projects.filter((p) => p.dir !== ui.dir);
+  const options = [['', 'Pick a workspace…'], ...projects.map((p) => [p.dir, p.inRoot ? p.name : p.dir]), ['__other__', 'Other folder…']];
+  if (suggested && !projects.some((p) => p.dir === suggested)) options.splice(1, 0, [suggested, suggested]);
+  fillSelect($('move-to'), options, suggested || '');
+  $('move-error').textContent = '';
+  renderMoveConfirm();
+  $('move-dialog').showModal();
+  $('move-to').focus();
+}
+
+function renderMoveConfirm() {
+  const to = $('move-to').value;
+  const ready = !!to && to !== '__other__';
+  $('move-submit').disabled = !ready;
+  $('move-confirm').classList.toggle('hidden', !ready);
+  if (!ready) return;
+  const c = mover.chat;
+  $('move-confirm').replaceChildren(
+    'Move ', el('strong', '', c.title), ` (${agentLabel(c.agent)}) from `, el('code', '', c.dir), ' to ', el('code', '', to), '?',
+  );
+}
+
+$('move-to').addEventListener('change', () => {
+  if ($('move-to').value === '__other__') {
+    const d = prompt('Absolute path of the folder on the host:', '')?.trim().replace(/(.)\/+$/, '$1');
+    if (d && d !== mover.chat.dir) {
+      const o = Object.assign(document.createElement('option'), { value: d, textContent: d });
+      $('move-to').insertBefore(o, $('move-to').lastChild);
+      $('move-to').value = d;
+    } else {
+      $('move-to').value = '';
+    }
+  }
+  $('move-error').textContent = '';
+  renderMoveConfirm();
+});
+
+$('move-cancel').addEventListener('click', () => $('move-dialog').close());
+$('move-chat').addEventListener('click', () => openMoveDialog());
+
+$('move-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const c = mover.chat;
+  const to = $('move-to').value;
+  if (!c || !to || to === '__other__') return;
+  $('move-submit').disabled = true;
+  mover.moving = c.key; // its chat_moved event is for other pages
+  try {
+    const r = await api('/api/move', { agent: c.agent, sessionId: c.sessionId, dir: c.dir, to, confirmed: true });
+    $('move-dialog').close();
+    await followMove(c, r.sessionId, r.dir, 'Moved');
+  } catch (err) {
+    $('move-error').textContent = err.message;
+    $('move-submit').disabled = false;
+  } finally {
+    mover.moving = null;
+  }
+});
+
+// The open chat moved, here or on another device: reopen it in its new
+// workspace with a line saying so. `sessionId` is its id there, which is a
+// new one for Codex.
+async function followMove(chat, sessionId, to, verb) {
+  dismissMoveOffers(chat.key);
+  if (ui.key !== chat.key) return scheduleSidebarRefresh();
+  setProject(to);
+  await loadProjects();
+  await loadSessions();
+  await openConversation(chat.agent, sessionId);
+  upsert({ id: 'moved-' + randomId(), kind: 'notice', text: `${verb} from ${chat.dir} to ${to}` });
+  scrollToBottom(true);
+}
+
+// After a turn that made a new project, offer to move the chat there. Each
+// offer shows once per chat on this page; Move opens the dialog above.
+const moveOffers = new Set();
+
+function offerMove(created) {
+  for (const dir of created || []) {
+    const id = `move-offer:${ui.key}:${dir}`;
+    if (moveOffers.has(id)) continue;
+    moveOffers.add(id);
+    resultCard({
+      id,
+      kicker: 'New project',
+      label: 'Move suggestion',
+      title: `This chat made ${dir.split('/').pop()}`,
+      output: dir,
+      note: 'Move the chat there so it is listed with that project and continues in its folder?',
+      action: { text: 'Move…', onclick: (card) => { card.remove(); openMoveDialog(dir); } },
+    });
+  }
+}
+
+// Leaving the chat takes its offers away; they come back when it is opened
+// again, unless they were dismissed.
+function forgetMoveOffers() {
+  for (const card of [...$('action-results').children]) {
+    if (!String(card.actionId).startsWith('move-offer:')) continue;
+    moveOffers.delete(card.actionId);
+    card.remove();
+  }
+}
+
+function dismissMoveOffers(key) {
+  for (const card of [...$('action-results').children]) if (String(card.actionId).startsWith(`move-offer:${key}:`)) card.remove();
 }
 
 // A user bubble: optional image thumbnails and text, with a fork control
@@ -1014,6 +1136,7 @@ function applyStatus(st) {
   if (st.mode && [...$('mode').options].some((o) => o.value === st.mode)) $('mode').value = st.mode;
   renderPending();
   if (wasRunning && !st.running) markRead();
+  if (!st.running && ui.sessionId) offerMove(st.created);
 }
 
 function announcePending(message) {
@@ -1083,6 +1206,14 @@ function connectEvents() {
     }
     if (ev.type === 'sessions_changed') {
       scheduleSidebarRefresh();
+      return;
+    }
+    if (ev.type === 'chat_moved') {
+      const key = `${ev.agent}:${ev.sessionId}`;
+      if (mover.moving === key) return;
+      if (ui.key === key && ui.dir !== ev.to) {
+        followMove({ agent: ev.agent, sessionId: ev.sessionId, key, dir: ev.from }, ev.newSessionId, ev.to, 'Moved on another device').catch((err) => alert(err.message));
+      } else dismissMoveOffers(key);
       return;
     }
     if (ev.type === 'devices_changed') {
@@ -2107,7 +2238,7 @@ function showActionResult(a, r) {
 
 // The card itself; the project bar's Restart uses it too. `id` names what
 // ran, so a new card for the same thing replaces the old one.
-function resultCard({ id, kicker, label, title, output, failed, note, link }) {
+function resultCard({ id, kicker, label, title, output, failed, note, link, action }) {
   const box = $('action-results');
   for (const old of box.children) if (old.actionId === id) old.remove();
   const card = el('div', 'perm action-card' + (failed ? ' failed' : ''));
@@ -2125,6 +2256,12 @@ function resultCard({ id, kicker, label, title, output, failed, note, link }) {
     a.target = '_blank';
     a.rel = 'noopener';
     row.appendChild(a);
+  }
+  if (action) {
+    const b = el('button', 'primary', action.text);
+    b.type = 'button';
+    b.onclick = () => action.onclick(card);
+    row.appendChild(b);
   }
   const close = el('button', '', 'Dismiss');
   close.type = 'button';

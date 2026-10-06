@@ -202,11 +202,31 @@ const deviceInfo = async (req) => ({ name: devices.nameOf(req.headers['user-agen
 const streams = new Map();
 
 // Every conversation starts with a map of the projects (lib/workspace-index.mjs),
-// and a message naming one of them offers it as an extra folder (lib/folders.mjs).
+// a message naming one of them offers it as an extra folder (lib/folders.mjs),
+// and a project made during a turn is offered as a place to move the chat.
 const hub = new Hub({
   instructions: () => workspaceIndex(listProjects, PROJECT_ROOTS),
   mentions: (text, dir, dirs) => mentionedFolders(text, rootFolders(PROJECT_ROOTS), dir, dirs),
+  created: (dir, since) => newProjects(dir, since),
 });
+
+// Folders under the project roots made since `since`, other than `dir` and
+// the ones it is in.
+function newProjects(dir, since) {
+  return rootFolders(PROJECT_ROOTS)
+    .filter((f) => f.dir !== dir && !dir.startsWith(f.dir + path.sep))
+    .filter((f) => {
+      try {
+        return fs.statSync(f.dir).birthtimeMs >= since - 1000;
+      } catch {
+        return false;
+      }
+    })
+    .map((f) => f.dir);
+}
+
+// Where moving a chat keeps a copy of each agent file it rewrites.
+const MOVED = path.join(os.homedir(), '.agentdeck', 'moved');
 
 // ---------- quick actions ----------
 
@@ -765,7 +785,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/agents') {
-      return send(res, 200, (await availableBackends()).map((b) => ({ id: b.id, label: b.label })));
+      return send(res, 200, (await availableBackends()).map((b) => ({ id: b.id, label: b.label, move: !!b.move })));
     }
 
     if (p === '/api/options') {
@@ -1023,6 +1043,58 @@ const server = http.createServer(async (req, res) => {
       if (tags.length) setTags(agent, forked.sessionId, tags);
       hub.broadcast({ type: 'sessions_changed', dir });
       return send(res, 200, { agent, sessionId: forked.sessionId, whole: !!forked.whole });
+    }
+
+    if (p === '/api/move' && req.method === 'POST') {
+      // Moves a chat to another folder with its history, tags and settings:
+      // it is then listed there and its next turn runs there. Only ever on
+      // the user's say-so: the page shows where it goes and sends
+      // `confirmed` once they agree; nothing moves a chat by itself.
+      const { agent, sessionId, dir, to, confirmed } = await readJson(req);
+      const backend = await backendFor(agent);
+      if (!backend) return send(res, 400, { error: 'Unknown agent' });
+      if (!backend.move) return send(res, 400, { error: `${backend.label} cannot move conversations.` });
+      if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) return send(res, 400, { error: 'Bad session' });
+      if (confirmed !== true) return send(res, 400, { error: 'Confirm the move first.' });
+      if (typeof dir !== 'string' || !path.isAbsolute(dir)) return send(res, 400, { error: 'Bad folder' });
+      if (typeof to !== 'string' || !path.isAbsolute(to) || to.length > 4096) return send(res, 400, { error: 'The new folder must be an absolute path.' });
+      const target = path.resolve(to);
+      if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) return send(res, 400, { error: `Folder not found: ${target}` });
+      if (sameFolder(dir, target)) return send(res, 400, { error: 'The chat is already in that folder.' });
+      const conv = hub.find(agent, sessionId);
+      if (conv?.running) return send(res, 409, { error: 'Wait for this turn to finish before moving the chat.' });
+      // Another app writing the chat would keep writing to the old place.
+      if (backend.working && (await backend.working().catch(() => [])).includes(sessionId)) {
+        return send(res, 409, { error: 'This chat is working in another app. Wait for it to finish before moving it.' });
+      }
+      const backup = path.join(MOVED, new Date().toISOString().replace(/[:.]/g, '-'));
+      fs.mkdirSync(backup, { recursive: true });
+      let moved;
+      try {
+        moved = await backend.move(sessionId, path.resolve(dir), target, backup);
+      } catch (err) {
+        return send(res, 400, { error: String(err?.message || err) });
+      } finally {
+        if (!fs.readdirSync(backup).length) fs.rmdirSync(backup);
+      }
+      // Codex's moved chat is a copy with a new id, so the chat's tags and
+      // settings go with it; the old id's live state is dropped.
+      const id = moved?.sessionId || sessionId;
+      const settings = settingsOf(agent, sessionId);
+      if (id !== sessionId) {
+        const tags = tagsOf(agent, sessionId);
+        if (tags.length) setTags(agent, id, tags);
+        if (conv) hub.live.delete(conv.key);
+      } else if (conv) {
+        conv.dir = target;
+        conv.created = [];
+      }
+      // The new folder is the chat's own now, not an extra one.
+      if (settings) setSettings(agent, id, { ...settings, dirs: settings.dirs.filter((d) => d !== target) });
+      hub.broadcast({ type: 'chat_moved', agent, sessionId, newSessionId: id, from: dir, to: target });
+      hub.broadcast({ type: 'sessions_changed', dir });
+      hub.broadcast({ type: 'sessions_changed', dir: target });
+      return send(res, 200, { agent, sessionId: id, dir: target });
     }
 
     if (p === '/api/read' && req.method === 'POST') {
