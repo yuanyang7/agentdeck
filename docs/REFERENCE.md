@@ -16,6 +16,7 @@ Detailed configuration and internals for agentdeck. Start with
 | `OPENCODE_BIN`  | `opencode` on `PATH`, else `~/.opencode/bin/opencode` | opencode binary to start.            |
 | `OPENCODE_URL`  | none                        | Use an already running `opencode serve` instead of starting one (with `OPENCODE_SERVER_PASSWORD` if it has one). |
 | `WORKSPACE_INDEX` | on                        | `off` stops giving agents the [workspace index](#workspace-index). |
+| `ROUTE_MODEL`   | `sonnet`                    | Model that picks the project for [Just ask](#just-ask); any name Claude Code's `--model` accepts. |
 | `AGENTDECK_SUPERVISED` | detected               | `1` if something restarts agentdeck when it exits, `0` if nothing does; see [Quick actions](#quick-actions). |
 | `TOOL_HUB_URL`  | `http://127.0.0.1:8765`     | Where [Tool Hub](#tool-hub) answers, for the project bar; `off` disables it. |
 | `FEEDBACK_LOOP` | on                          | `off` hides the [feedback-loop](#feedback-loop) entries in the project bar. |
@@ -203,6 +204,33 @@ including whatever provider opencode is set up with. Set
 `WORKSPACE_INDEX=off` if that matters. The index only tells the agent where
 to look. Access to another project comes from the chat's
 [extra folders](#extra-folders).
+
+## Just ask
+
+**Just ask** in the sidebar starts a chat with no workspace picked. The
+first message is sent to `POST /api/route`, which asks a cheap model which
+project it is about and answers `{ dir, name, confidence, reason, model }`.
+The page then switches to that workspace, opens a new chat there and sends
+the message through the usual `/api/send`, with the agent, model, effort,
+mode and extra folders the composer shows. A line at the top of the chat
+says which project was picked and why.
+
+The routing call is a Claude Code run through the Agent SDK with no tools,
+one turn, a JSON output schema and no saved session, so it never appears in
+the sidebar or in `claude --resume`. It needs the host's Claude Code login,
+whichever agent will do the work. `ROUTE_MODEL` picks the model, `sonnet`
+by default (the alias for the current Sonnet). The system prompt is the
+[workspace index](#workspace-index), so the model sees each project's path,
+README paragraph and recent chat titles, and the message itself. A call
+takes a few seconds and costs about 2,500 input tokens, most of it the index.
+
+The answer has to be a top-level project under `PROJECT_ROOTS`; a path
+inside one counts for that project, and anything else counts as no match.
+When the answer is no match (a general question, or a task that asks for a
+new project), the page says so and keeps the task in the composer. When the
+confidence is `low`, it asks before sending. Picking a workspace, opening a
+chat or pressing **New conversation** leaves the Just ask state. A message
+with only images can't be routed; add words.
 
 ## Extra folders
 
@@ -449,6 +477,7 @@ its own, and the prompt leaves the address once the page has read it.
   agent.
 - `lib/items.mjs`: the agent-neutral transcript format the page renders.
 - `lib/workspace-index.mjs`: the project map given to agents.
+- `lib/router.mjs`: Just ask, picking the project a task is about.
 - `lib/folders.mjs`: a chat's extra folders: checking them and spotting
   projects a message names.
 - `lib/commands.mjs`: reading a `/name` message and caching each folder's

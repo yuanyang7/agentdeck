@@ -26,6 +26,7 @@ import { rootFolders, checkFolders, mentionedFolders } from './lib/folders.mjs';
 import * as devices from './lib/devices.mjs';
 import * as actions from './lib/actions.mjs';
 import * as toolhub from './lib/toolhub.mjs';
+import { routeTask, MODEL as ROUTE_MODEL } from './lib/router.mjs';
 import * as feedbackloop from './lib/feedbackloop.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -819,6 +820,21 @@ const server = http.createServer(async (req, res) => {
         hub.broadcast({ type: 'sessions_changed', dir });
       }
       return send(res, 200, { items, live: conv ? hub.snapshot(conv) : null, settings: sessionId ? await chatSettings(backend, sessionId, dir) : null });
+    }
+
+    if (p === '/api/route' && req.method === 'POST') {
+      // "Just ask": which project a task is about, decided by a cheap model
+      // from the workspace index (lib/router.mjs). The page then sends the
+      // task to a new chat there.
+      const { text = '' } = await readJson(req);
+      if (typeof text !== 'string' || !text.trim()) return send(res, 400, { error: 'Empty message' });
+      const projects = await listProjects();
+      if (!projects.some((x) => x.inRoot)) return send(res, 400, { error: 'No projects under the project roots.' });
+      try {
+        return send(res, 200, { ...(await routeTask(text, projects, PROJECT_ROOTS)), model: ROUTE_MODEL });
+      } catch (err) {
+        return send(res, 502, { error: err.message });
+      }
     }
 
     if (p === '/api/send' && req.method === 'POST') {

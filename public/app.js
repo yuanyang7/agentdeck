@@ -11,6 +11,7 @@ const ui = {
   mode: null, // mode reported by the live conversation, if any
   settings: null, // { model, effort, mode, dirs } the open chat uses, as stored on the server
   draftDirs: [], // extra folders picked for a new chat before its first message
+  ask: false, // "Just ask": a new chat whose project is picked from the message (see /api/route)
   pending: [],
   queue: [], // messages waiting for the running turn: [{ id, text, images (count) }]
   sessions: [],
@@ -53,7 +54,9 @@ async function api(path, body) {
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   // Links from before there were several agents have no `a`; those are Claude.
-  return { dir: h.get('dir'), agent: h.get('a') || 'claude', s: h.get('s') };
+  // `prompt` comes from tools that hand a task over (e.g. demoreel's dashboard):
+  // it fills a new chat's composer and is never sent on its own.
+  return { dir: h.get('dir'), agent: h.get('a') || 'claude', s: h.get('s'), prompt: h.get('prompt') };
 }
 function writeHash() {
   const h = new URLSearchParams();
@@ -496,6 +499,43 @@ $('new-chat').addEventListener('click', () => {
   $('input').focus();
 });
 
+$('just-ask').addEventListener('click', () => {
+  newConversation(true);
+  setSidebarOpen(false);
+  $('input').focus();
+});
+
+// Asks the server which project `text` is about and switches the page to
+// it. Returns false when the task stays in the composer: no project fits,
+// the guess was declined, or the call failed.
+async function routeToProject(text) {
+  $('status').textContent = 'Picking a project…';
+  let r;
+  try {
+    r = await api('/api/route', { text });
+  } catch (err) {
+    $('status').textContent = '';
+    alert(`Could not pick a project: ${err.message}\nPick a workspace and send it there.`);
+    return false;
+  }
+  $('status').textContent = '';
+  if (!ui.ask || ui.key) return false; // the page moved on meanwhile
+  if (!r.dir) {
+    alert(`Could not tell which project this is about.${r.reason ? ' ' + r.reason : ''}\nPick a workspace and send it there.`);
+    return false;
+  }
+  if (r.confidence === 'low' && !confirm(`Not sure which project this is. Send it to ${r.name}?\n${r.reason}`)) return false;
+  const changed = r.dir !== ui.dir;
+  setProject(r.dir);
+  ui.ask = false;
+  $('just-ask').classList.remove('on');
+  $('title').textContent = 'New conversation';
+  $('subtitle').textContent = r.dir;
+  if (changed) await loadSessions();
+  upsert({ id: 'route-' + randomId(), kind: 'notice', text: `Sent to ${r.name} (${r.confidence} confidence, ${r.model}): ${r.reason}` });
+  return true;
+}
+
 const mobileSidebar = matchMedia('(max-width: 760px)');
 
 function setSidebarOpen(open) {
@@ -538,11 +578,15 @@ function resetView() {
   renderQueue();
 }
 
-function newConversation() {
+// With `ask`, the chat has no workspace yet: the first message is routed to
+// the project it is about and sent there (see the composer's submit).
+function newConversation(ask = false) {
   ui.key = null;
   ui.sessionId = null;
   ui.running = false;
   ui.draftDirs = [];
+  ui.ask = !!ask;
+  $('just-ask').classList.toggle('on', ui.ask);
   renderFolders();
   resetView();
   $('messages').innerHTML = '';
@@ -551,15 +595,21 @@ function newConversation() {
   mark.src = '/agentdeck-icon.png';
   mark.alt = '';
   empty.appendChild(mark);
-  empty.appendChild(el('h2', '', 'What are we building today?'));
+  empty.appendChild(el('h2', '', ui.ask ? 'What needs doing?' : 'What are we building today?'));
   const intro = el('p');
-  intro.append('Start a conversation in ');
-  intro.appendChild(el('span', 'empty-project', ui.dir?.split('/').pop() || 'this project'));
-  intro.append('.');
+  if (ui.ask) {
+    intro.append('Describe the task. A quick model call picks the ');
+    intro.appendChild(el('span', 'empty-project', 'project'));
+    intro.append(' and the work starts there.');
+  } else {
+    intro.append('Start a conversation in ');
+    intro.appendChild(el('span', 'empty-project', ui.dir?.split('/').pop() || 'this project'));
+    intro.append('.');
+  }
   empty.appendChild(intro);
   $('messages').appendChild(empty);
-  $('title').textContent = 'New conversation';
-  $('subtitle').textContent = ui.dir || '';
+  $('title').textContent = ui.ask ? 'Just ask' : 'New conversation';
+  $('subtitle').textContent = ui.ask ? 'Project picked from your message' : ui.dir || '';
   selectAgent(localStorage.getItem('cw_agent'));
   setRunning(false);
   renderSessions();
@@ -573,6 +623,8 @@ async function openConversation(agent, id) {
   ui.key = temp ? id : `${agent}:${id}`;
   ui.sessionId = temp ? null : id;
   ui.settings = null;
+  ui.ask = false;
+  $('just-ask').classList.remove('on');
   renderFolders();
   const key = ui.key;
   resetView();
@@ -881,12 +933,15 @@ function renderItem(item, streaming) {
 function upsert(patch, streaming) {
   const item = { ...ui.items.get(patch.id), ...patch };
   let old = ui.els.get(item.id);
-  const draft = item.replaces && ui.els.get(item.replaces);
-  if (draft) {
+  if (item.replaces) {
+    // The draft may not be drawn yet (its frame is still pending); forgetting
+    // it here keeps that frame from drawing it after its replacement.
+    const draft = ui.els.get(item.replaces);
     ui.els.delete(item.replaces);
     ui.items.delete(item.replaces);
-    if (old) draft.remove();
-    else old = draft;
+    dirty.delete(item.replaces);
+    if (draft && old) draft.remove();
+    else if (draft) old = draft;
   }
   ui.items.set(item.id, item);
   rememberImagePaths(item);
@@ -973,7 +1028,7 @@ function setRunning(running) {
   // While a turn runs, sending queues the message for after it.
   $('send').firstChild.textContent = running ? 'Queue ' : 'Send ';
   $('send').title = running ? 'Runs after the current turn finishes' : '';
-  $('input').placeholder = `${running ? 'Queue a message for' : 'Message'} ${agentLabel(ui.agent)}…`;
+  $('input').placeholder = ui.ask && !running ? `Describe a task for ${agentLabel(ui.agent)}; the project is picked for you…` : `${running ? 'Queue a message for' : 'Message'} ${agentLabel(ui.agent)}…`;
   $('status').classList.remove('status-error');
   $('status').removeAttribute('role');
   $('status').innerHTML = '';
@@ -1367,7 +1422,7 @@ async function selectAgent(agent) {
   hideCommandMenu();
   $('agent').value = agent;
   $('agent').disabled = !!ui.key;
-  $('input').placeholder = `Message ${agentLabel(agent)}…`;
+  $('input').placeholder = ui.ask ? `Describe a task for ${agentLabel(agent)}; the project is picked for you…` : `Message ${agentLabel(agent)}…`;
   let o;
   try {
     o = await loadOptions(agent);
@@ -1872,6 +1927,17 @@ $('composer').addEventListener('submit', async (e) => {
   const text = input.value.trim();
   if ((!text && !attachments.length) || !ui.dir || $('send').disabled) return;
   $('send').disabled = true;
+  if (ui.ask && !ui.key) {
+    // "Just ask": the project comes from the message. Images alone say
+    // nothing about it, so a message needs text.
+    let routed = false;
+    if (text) routed = await routeToProject(text).catch(() => false);
+    else alert('Describe the task in words so a project can be picked.');
+    if (!routed) {
+      $('send').disabled = false;
+      return;
+    }
+  }
   const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
   const isNew = !ui.key;
   const dirs = chatDirs();
@@ -2532,7 +2598,14 @@ async function start() {
   startHubPolling();
   await loadSessions();
   if (h.s) await openConversation(h.agent, h.s);
-  else newConversation();
+  else {
+    newConversation(); // rewrites the hash, so the prompt doesn't come back on reload
+    if (h.prompt) {
+      $('input').value = h.prompt;
+      autosize();
+      $('input').focus();
+    }
+  }
   connectEvents();
 }
 

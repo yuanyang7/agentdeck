@@ -151,6 +151,17 @@ of a chat's first message, so whatever you typed there goes to the provider
 of every new chat. Set `WORKSPACE_INDEX=off` to turn it off — see
 [docs/REFERENCE.md](docs/REFERENCE.md#workspace-index).
 
+### Just ask
+
+**Just ask** in the sidebar takes a task with no workspace picked. A quick
+call to a cheap model (Sonnet, by default) reads the workspace index and
+names the project the task is about; the page then opens a new chat there
+and sends the task as typed, with the agent, model and mode the composer
+shows. The chat starts with a line saying which project was picked and why.
+When no project fits, or the guess is a weak one, the task stays in the
+composer for you to place. See
+[docs/REFERENCE.md](docs/REFERENCE.md#just-ask).
+
 ### Folders
 
 A chat works in its project folder, and can work in other folders too. The
