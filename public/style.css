@@ -121,6 +121,8 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 .sessions .s-meta { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 7px; animation: pulse 1.3s infinite; }
 .dot.unread { background: var(--accent); animation: none; }
+/* Same pulse, hollow: the turn runs in the terminal or desktop app, not here. */
+.dot.elsewhere { background: none; box-shadow: inset 0 0 0 1.5px var(--ok); }
 .dot.decision { background: var(--warn-ink); animation: none; }
 @keyframes pulse { 50% { opacity: .3; } }
 .s-tags, .tag-filter { display: flex; flex-wrap: wrap; gap: 5px; }

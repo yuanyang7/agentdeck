@@ -442,8 +442,8 @@ function sessionRow(s, showWorkspace = false) {
       d.title = 'Needs a decision';
       t.appendChild(d);
     } else if (s.running) {
-      const d = document.createElement('span');
-      d.className = 'dot';
+      const d = el('span', 'dot' + (s.elsewhere ? ' elsewhere' : ''));
+      d.title = s.elsewhere ? 'Working in another app' : 'Working';
       t.appendChild(d);
     } else if (s.unread && (s.key !== ui.key || s.dir !== ui.dir)) {
       // A turn finished here that this browser hasn't seen; opening the chat
@@ -458,7 +458,7 @@ function sessionRow(s, showWorkspace = false) {
     const meta = el('div', 's-meta');
     if (ui.agents.length > 1) meta.appendChild(el('span', 'agent-badge', agentLabel(s.agent)));
     meta.appendChild(document.createTextNode([showWorkspace && ui.projects.find((p) => p.dir === s.dir)?.name,
-      s.pendingCount ? 'Needs decision' : s.running ? 'Working' : s.unread ? 'Finished · unread' : null,
+      s.pendingCount ? 'Needs decision' : s.elsewhere ? 'Working in another app' : s.running ? 'Working' : s.unread ? 'Finished · unread' : null,
       timeAgo(s.updatedAt), s.branch].filter(Boolean).join(' · ')));
     li.append(t, meta);
     if (s.tags?.length) {

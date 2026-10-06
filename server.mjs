@@ -337,6 +337,32 @@ function sameFolder(a, b) {
 
 // ---------- projects ----------
 
+// A chat is running when agentdeck runs a turn in it, or when a backend sees
+// it mid-turn in another app (`elsewhere`: no Stop, no live items here).
+function runState(s, live) {
+  const elsewhere = !live?.running && !!s.working;
+  return { working: undefined, running: !!live?.running || elsewhere, elsewhere };
+}
+
+// Chats working in other apps change without agentdeck hearing of it, so the
+// backends that can tell are polled and the sidebars refreshed on a change.
+const WORKING_POLL = 10 * 1000;
+let workingElsewhere = '';
+setInterval(async () => {
+  const keys = [];
+  for (const b of await availableBackends().catch(() => [])) {
+    if (!b.working) continue;
+    try {
+      for (const id of await b.working()) if (!hub.get(`${b.id}:${id}`)?.running) keys.push(`${b.id}:${id}`);
+    } catch (err) {
+      console.error(`${b.id} working failed:`, err);
+    }
+  }
+  const now = keys.sort().join(' ');
+  if (now !== workingElsewhere) hub.broadcast({ type: 'sessions_changed' });
+  workingElsewhere = now;
+}, WORKING_POLL).unref();
+
 async function listProjects() {
   const byDir = new Map();
   // `inRoot`: directly under a project root, rather than any folder with chats.
@@ -356,7 +382,7 @@ async function listProjects() {
       const agent = agents[index].id;
       const key = `${agent}:${s.id}`;
       const live = hub.get(key);
-      const chat = { ...s, agent, key, dir: s.dir, running: !!live?.running,
+      const chat = { ...s, agent, key, dir: s.dir, ...runState(s, live),
         pendingCount: live?.pending.size || 0, unread: isUnread(agent, s.id), tags: tagsOf(agent, s.id) };
       p.sessions += 1;
       p.lastModified = Math.max(p.lastModified, s.updatedAt || 0);
@@ -396,7 +422,7 @@ async function listConversations(dir) {
     for (const s of sessions) {
       const key = `${b.id}:${s.id}`;
       const live = hub.get(key);
-      out.push({ ...s, agent: b.id, key, dir, running: !!live?.running, pendingCount: live?.pending.size || 0, unread: isUnread(b.id, s.id), tags: tagsOf(b.id, s.id) });
+      out.push({ ...s, agent: b.id, key, dir, ...runState(s, live), pendingCount: live?.pending.size || 0, unread: isUnread(b.id, s.id), tags: tagsOf(b.id, s.id) });
     }
   }
   out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
