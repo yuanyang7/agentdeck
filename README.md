@@ -31,11 +31,13 @@ that login. Codex and opencode are optional: each one installed on the host
 shows up as another agent, using its own login.
 
 By default agentdeck listens on this machine's Tailscale IP, port 7878, so
-only devices on your tailnet can reach it. On startup it prints the address
-to open from other devices; prefer the MagicDNS name it prints
-(`http://<machine-name>:7878`) over a bare IP, and always include the
-`http://` prefix. It also answers on `http://localhost:7878` on the host
-itself.
+only devices on your tailnet can reach it. On startup it prints the one
+address to open on every device — its MagicDNS name,
+`http://<machine-name>.<tailnet>.ts.net:7878`. Always include the `http://`
+prefix. A bare IP, the short name, or `http://localhost:7878` on the host all
+work too and send the page to that one name, because a browser approved under
+one name would otherwise have to be approved again under the next (see
+[Security](#security)).
 
 The first time you open it, the page shows a code and waits for approval.
 Run `npm run approve` in this folder on the host and type that code to let
@@ -55,7 +57,8 @@ asking for that code; typing it there lets the new browser in. The code is
 only ever shown on the new browser, so nobody can get approved by a tap on a
 prompt you didn't expect. For the very first device, run `npm run approve` on
 the host and type the code there. Approvals are
-kept on the host, so restarts don't sign anyone out. **Devices**, at the
+kept on the host, so restarts don't sign anyone out, and the page always
+opens under one host name so a browser's approval keeps working. **Devices**, at the
 bottom of the sidebar, lists them and removes any you no longer use. If a
 `PASSWORD` is set, typing it also approves a browser.
 

@@ -9,6 +9,7 @@ Detailed configuration and internals for agentdeck. Start with
 | --------------- | ---------------------------- | ------------------------------------------------------------ |
 | `PASSWORD`      | none                        | A password that approves a browser, besides approval from another [device](#devices). |
 | `ALLOWED_HOSTS` | none                        | `,`-separated extra host names the page may be opened under, besides IP addresses, `localhost` and the MagicDNS name (see [Devices](#devices)). |
+| `CANONICAL_HOST` | MagicDNS name              | The one name the page is opened under, so each browser is approved once (see [Devices](#devices)). A name uses that one; `off` serves the page under every name. |
 | `PORT`          | `7878`                      | Port to listen on.                                           |
 | `HOST`          | Tailscale IP, else 127.0.0.1 | Address to bind.                                            |
 | `PROJECT_ROOTS` | `~/code`                    | `:`-separated folders whose subfolders appear as projects.   |
@@ -66,6 +67,26 @@ lasts 400 days (the most browsers allow) and is renewed on every visit.
 with **Ask again** to request approval anew. A web app added to an iPhone home screen has its own cookies, so it
 counts as a separate device. To start over, stop agentdeck, delete
 `devices.json`, and approve again.
+
+### One name per browser
+
+Browsers keep cookies per host name, so the same browser is a different
+device under `http://100.x.y.z:7878` than under
+`http://machine.tail-name.ts.net:7878`, and opening agentdeck under both
+means approving it twice. So the page is sent to one name — the MagicDNS
+name, as the startup banner prints it — whatever name it was opened under,
+including `localhost` on the host. Only the page moves: files, the API and
+`npm run approve` answer under any name, which is why a `302` can't cut off
+a device mid-chat.
+
+`CANONICAL_HOST` is that name. Set it to another name of this machine's to
+use that one instead (behind `tailscale serve`, say, where requests already
+arrive under the full MagicDNS name), or to `off` to serve the page under
+every name and approve each one separately. Names in `ALLOWED_HOSTS` are
+never redirected, since they were added on purpose — a `.local` name for a
+device off the tailnet, for instance, where the MagicDNS name wouldn't
+resolve. For a device that can't resolve it either, `?stay`
+(`http://100.x.y.z:7878/?stay`) opens the page under the name as typed.
 
 agentdeck doesn't treat requests from `localhost` as trusted, because with
 `tailscale serve` every request arrives from there. It also refuses two kinds

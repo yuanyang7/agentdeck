@@ -116,24 +116,52 @@ function crossSite(req) {
 // ALLOWED_HOSTS.
 const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
 
-function ownNames() {
-  const names = new Set(['localhost', ...ALLOWED_HOSTS]);
-  const magic = magicDnsName()?.toLowerCase();
-  if (magic) names.add(magic).add(magic.split('.')[0]);
-  return names;
-}
+// A device key lives in a cookie, and browsers keep cookies per host name, so
+// the same browser opening agentdeck under the IP and then under the MagicDNS
+// name has to be approved twice. The page is sent to one name instead: the
+// MagicDNS name, or CANONICAL_HOST (`off` turns it off, a name uses that one).
+const CANONICAL = (process.env.CANONICAL_HOST || '').trim().toLowerCase().replace(/\.$/, '');
 
-let hostNames = ownNames();
-let hostNamesAt = Date.now();
+const hostOf = (req) => (req.headers.host || '').toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+
+let hostNames = new Set();
+let canonicalHost = null;
+let hostNamesAt = 0;
+
+function lookUpNames() {
+  const magic = magicDnsName()?.toLowerCase();
+  canonicalHost = CANONICAL === 'off' ? null : CANONICAL || magic || null;
+  hostNames = new Set(['localhost', ...ALLOWED_HOSTS]);
+  if (magic) hostNames.add(magic).add(magic.split('.')[0]);
+  if (canonicalHost) hostNames.add(canonicalHost);
+  hostNamesAt = Date.now();
+}
+lookUpNames();
 
 function knownHost(req) {
-  const host = (req.headers.host || '').toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+  const host = hostOf(req);
   if (!host || net.isIP(host.replace(/^\[|\]$/g, '')) || hostNames.has(host)) return true;
   // Tailscale may have come up, or the machine been renamed, since the last look.
   if (Date.now() - hostNamesAt < 60_000) return false;
-  hostNames = ownNames();
-  hostNamesAt = Date.now();
+  lookUpNames();
   return hostNames.has(host);
+}
+
+// Where to send the page when it was opened under another of this machine's
+// names, so every browser keeps one cookie and so needs one approval. Only
+// the page itself moves: files, the API and the terminal's calls answer under
+// any name. `?stay` opens it under the name as typed, for a device the
+// canonical name doesn't resolve on, and a name in ALLOWED_HOSTS is left
+// alone, since it was added on purpose (a LAN name off the tailnet, say).
+function canonicalPage(req, url) {
+  if (CANONICAL === 'off' || url.searchParams.has('stay')) return null;
+  // Tailscale may not have been up when the names were last looked up.
+  if (!canonicalHost && Date.now() - hostNamesAt > 60_000) lookUpNames();
+  const host = hostOf(req);
+  if (!canonicalHost || !host || host === canonicalHost || ALLOWED_HOSTS.includes(host)) return null;
+  const port = /:(\d+)$/.exec(req.headers.host || '')?.[1];
+  const proto = req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+  return `${proto}://${canonicalHost}${port ? `:${port}` : ''}${url.pathname}${url.search}`;
 }
 
 // Wrong passwords per address, to slow down guessing.
@@ -503,6 +531,12 @@ const server = http.createServer(async (req, res) => {
   try {
     if (!knownHost(req)) {
       return send(res, 403, `agentdeck doesn't answer to the name ${req.headers.host}. Add it to ALLOWED_HOSTS if it's yours.`);
+    }
+
+    if (p === '/' && req.method === 'GET') {
+      const to = canonicalPage(req, url);
+      // 302, never 301: a browser must not remember this if the name changes.
+      if (to) return send(res, 302, `agentdeck is at ${to}\n`, { location: to });
     }
 
     if (STATIC[p] && req.method === 'GET') {
@@ -995,8 +1029,10 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`agentdeck listening on http://${HOST}:${PORT}`);
-  const name = HOST.startsWith('100.') && magicDnsName();
-  if (name) console.log(`Open from other devices: http://${name}:${PORT}  (or http://${name.split('.')[0]}:${PORT})`);
+  if (canonicalHost) {
+    console.log(`Open on every device: http://${canonicalHost}:${PORT}`);
+    console.log('  The page under another name is sent here, so each browser is approved once.');
+  }
   const approved = devices.list().length;
   console.log(`Approved devices: ${approved}${approved ? '' : ' (open agentdeck in a browser, then run `npm run approve` here)'}`);
   if (PASSWORD) console.log('Password: on (it also approves a device)');
@@ -1013,5 +1049,6 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));
 if (HOST !== '127.0.0.1' && HOST !== 'localhost' && HOST !== '0.0.0.0' && HOST !== '::') {
   const local = http.createServer((req, res) => server.emit('request', req, res));
   local.on('error', (err) => console.warn(`Not listening on localhost:${PORT}: ${err.message}`));
-  local.listen(PORT, '127.0.0.1', () => console.log(`Also on http://localhost:${PORT}`));
+  local.listen(PORT, '127.0.0.1', () => console.log(`Also on http://localhost:${PORT}`
+    + (canonicalHost ? ', which opens the name above (add ?stay to keep localhost)' : '')));
 }
