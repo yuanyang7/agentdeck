@@ -191,6 +191,16 @@ same buttons; on a phone, Restart stays in the header and ⚡ opens the rest.
 See [docs/REFERENCE.md](docs/REFERENCE.md#quick-actions) for how the
 restart works under a LaunchAgent or when started by hand.
 
+If [Tool Hub](https://github.com/yuanyang7/tool-hub) is running on the host
+and knows the open workspace, the header also shows a **project bar** for
+its dev server: a dot that is green while it runs, **Open** to visit it,
+**Restart** to restart it through the hub (asking first, then showing the
+hub's answer in a card like a quick action's), and **Hub** to open the
+project in Tool Hub. Links use whatever host name the page was opened with,
+so they work from a phone on the tailnet too. On a phone the bar is just
+the dot; tap it for the three actions. Without a hub nothing is shown. See
+[docs/REFERENCE.md](docs/REFERENCE.md#tool-hub).
+
 ## More
 
 [docs/REFERENCE.md](docs/REFERENCE.md) covers:

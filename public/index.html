@@ -55,6 +55,16 @@
           <div id="title">New conversation</div>
           <div id="subtitle" class="muted"></div>
         </div>
+        <div id="project-bar" class="project-bar hidden" role="group" aria-label="Project dev server">
+          <span class="project-bar-label"><span class="hub-dot" aria-hidden="true"></span><span class="hub-name"></span></span>
+          <button id="project-bar-toggle" class="project-bar-toggle" type="button" aria-expanded="false" aria-controls="project-bar-menu"><span class="hub-dot" aria-hidden="true"></span><span class="hub-name"></span></button>
+          <div id="project-bar-menu" class="project-bar-menu">
+            <span class="hub-name menu-name"></span>
+            <a id="hub-open" class="action-button hub-button" target="_blank" rel="noopener">Open <span aria-hidden="true">↗</span></a>
+            <button id="hub-restart" class="action-button hub-button" type="button">Restart</button>
+            <a id="hub-link" class="action-button hub-button" target="_blank" rel="noopener">Hub <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
         <span id="status" class="status"></span>
         <button id="approval-jump" class="approval-jump hidden" type="button" aria-controls="pending"><span class="approval-text">Review request</span><span class="approval-short">Review</span><span id="approval-count" class="approval-count">1</span></button>
         <button id="toggle-sound" class="sound-button" type="button" aria-pressed="true"><span aria-hidden="true">🔔</span></button>

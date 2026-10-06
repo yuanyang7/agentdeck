@@ -156,6 +156,20 @@ button.tag.on { background: var(--accent); color: var(--accent-text); border-col
 /* On phones only the first action (Restart) stays in the header; ⚡ opens the rest. */
 .actions-toggle, .actions-panel { display: none; }
 @keyframes action-pulse { 50% { opacity: .45; } }
+/* Project bar: the workspace's dev server, when Tool Hub knows it. The label
+   is for wide screens; on phones the dot becomes a button that opens the menu. */
+.project-bar { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; }
+.project-bar-label, .project-bar-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 650; white-space: nowrap; }
+.project-bar-label { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.project-bar-toggle { display: none; }
+.hub-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); opacity: .6; }
+.project-bar.running .hub-dot { background: var(--ok); opacity: 1; }
+.project-bar-menu { display: flex; align-items: center; gap: 6px; }
+.menu-name { display: none; } /* the phone menu's heading */
+a.hub-button { border: 1px solid var(--border); background: var(--card); border-radius: 10px; text-decoration: none; }
+a.hub-button:hover { border-color: var(--accent); }
+.hub-button span { color: var(--muted); }
+.hub-button.running { animation: action-pulse 1s ease-in-out infinite; }
 .messages { flex: 1; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 20px; padding: 30px max(28px, calc((100% - 880px) / 2)) 40px; scrollbar-width: thin; }
 .messages > * { flex: none; min-width: 0; width: 100%; }
 .empty { align-self: center; text-align: center; margin: auto 0; padding: 40px 16px 80px; }
@@ -345,6 +359,13 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   .actions-toggle { display: inline-flex; flex: none; padding: 6px 8px; font-size: 14px; line-height: 1.15; }
   .actions-toggle[aria-expanded="true"] { border-color: var(--accent); }
   .actions-panel { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--card) 76%, var(--bg)); }
+  .project-bar-label { display: none; }
+  .project-bar-toggle { display: inline-flex; padding: 6px 8px; min-height: 38px; }
+  .project-bar-toggle .hub-name { display: none; }
+  .project-bar-toggle[aria-expanded="true"] { border-color: var(--accent); }
+  .project-bar-menu { display: none; position: absolute; z-index: 5; top: calc(100% + 6px); left: 12px; right: 12px; flex-wrap: wrap; padding: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+  .project-bar.open .project-bar-menu { display: flex; }
+  .project-bar-menu .menu-name { display: block; flex-basis: 100%; font-size: 12px; font-weight: 650; }
   .messages { padding: 20px 16px 28px; gap: 17px; }
   .empty { padding-bottom: 50px; }
   .empty-mark { width: 56px; height: 56px; }

@@ -25,6 +25,7 @@ import { workspaceIndex, enabled as workspaceIndexEnabled } from './lib/workspac
 import { rootFolders, checkFolders, mentionedFolders } from './lib/folders.mjs';
 import * as devices from './lib/devices.mjs';
 import * as actions from './lib/actions.mjs';
+import * as toolhub from './lib/toolhub.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STARTED = Date.now(); // pages compare this to tell a restarted server from the old one
@@ -251,6 +252,35 @@ function runCommand(command, cwd) {
 }
 
 const runningTurns = () => [...hub.live.values()].filter((c) => c.running).length;
+
+// ---------- project bar (Tool Hub) ----------
+
+// The open workspace's tool in Tool Hub (lib/toolhub.mjs), with the links the
+// page needs. The hub relays each tool's port on the Tailscale IP, so a tool
+// is reached under the host the page used for agentdeck, and so is the hub.
+async function hubStatus(req, dir) {
+  if (!toolhub.enabled) return { hub: null, disabled: true };
+  const tool = await toolhub.toolFor(dir);
+  if (tool === undefined) return { hub: null };
+  const host = toolhub.host || (req.headers.host || 'localhost').replace(/:\d+$/, '');
+  const base = `http://${host}`;
+  return {
+    hub: { url: `${base}:${toolhub.port}/${tool ? `#tool=${encodeURIComponent(tool.id)}` : ''}` },
+    tool: tool && {
+      ...tool,
+      url: tool.port ? `${base}:${tool.port}/` : '',
+      self: sameFolder(dir, ROOT), // agentdeck itself: the page restarts it the built-in way
+    },
+  };
+}
+
+function sameFolder(a, b) {
+  try {
+    return fs.realpathSync(a) === fs.realpathSync(b);
+  } catch {
+    return false;
+  }
+}
 
 // ---------- projects ----------
 
@@ -594,6 +624,27 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (p === '/api/hub' && req.method === 'GET') {
+      // The project bar: Tool Hub's tool for the open workspace, if any.
+      const dir = url.searchParams.get('dir') || '';
+      if (!path.isAbsolute(dir)) return send(res, 400, { error: 'Project folder not found' });
+      return send(res, 200, await hubStatus(req, dir));
+    }
+
+    if (p === '/api/hub/restart' && req.method === 'POST') {
+      // Restarts the workspace's dev server through the hub; the answer is
+      // the hub's own message.
+      const { dir } = await readJson(req);
+      if (typeof dir !== 'string' || !path.isAbsolute(dir)) return send(res, 400, { error: 'Project folder not found' });
+      const tool = await toolhub.toolFor(dir);
+      if (!tool) return send(res, 404, { error: tool === undefined ? 'Tool Hub is not running.' : 'This folder is not a Tool Hub tool.' });
+      try {
+        return send(res, 200, { message: await toolhub.restart(tool.id) });
+      } catch (err) {
+        return send(res, 502, { error: `Tool Hub: ${err.message}` });
+      }
+    }
+
     if (p === '/api/agents') {
       return send(res, 200, (await availableBackends()).map((b) => ({ id: b.id, label: b.label })));
     }
@@ -882,6 +933,7 @@ server.listen(PORT, HOST, () => {
   console.log(`Project roots: ${PROJECT_ROOTS.join(', ')}`);
   console.log(`Workspace index for agents: ${workspaceIndexEnabled ? 'on' : 'off'}`);
   availableBackends().then((list) => console.log(`Agents: ${list.map((b) => b.label).join(', ')}`));
+  toolhub.probe(); // prints whether a Tool Hub answered, once it has (or hasn't)
 });
 
 // Exit through process.exit so agents' child processes are cleaned up.

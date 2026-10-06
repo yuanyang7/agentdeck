@@ -17,6 +17,7 @@ Detailed configuration and internals for agentdeck. Start with
 | `OPENCODE_URL`  | none                        | Use an already running `opencode serve` instead of starting one (with `OPENCODE_SERVER_PASSWORD` if it has one). |
 | `WORKSPACE_INDEX` | on                        | `off` stops giving agents the [workspace index](#workspace-index). |
 | `AGENTDECK_SUPERVISED` | detected               | `1` if something restarts agentdeck when it exits, `0` if nothing does; see [Quick actions](#quick-actions). |
+| `TOOL_HUB_URL`  | `http://127.0.0.1:8765`     | Where [Tool Hub](#tool-hub) answers, for the project bar; `off` disables it. |
 
 ```bash
 PASSWORD='something-long' npm start
@@ -341,6 +342,44 @@ reload in session storage. Anyone who can use agentdeck can run these
 commands, which is no more than an agent in a bypass mode can already do;
 the same device approval and same-site checks apply.
 
+### Tool Hub
+
+[Tool Hub](https://github.com/yuanyang7/tool-hub) is a local control panel
+that starts and stops the dev server of each project under `~/code`. When it
+runs, the header shows a project bar for the open workspace's tool; without
+it nothing shows, and agentdeck never waits for it.
+
+Discovery: the server asks `GET /api/tools` at `TOOL_HUB_URL` (default
+`http://127.0.0.1:8765`; `off` disables the whole feature) and keeps the
+answer for 30 seconds; a failed probe, with a 3-second timeout, counts as
+"no hub" for the same 30 seconds and is tried again on the next request
+after that. One probe runs at startup, without blocking it, and prints
+whether a hub answered. The open workspace maps to the tool whose `dir`
+in the hub's payload is the same folder (both paths are resolved through
+symlinks, and only an exact match counts, so a chat in a subfolder of a
+tool shows no bar).
+
+Routes, behind the usual device and same-site checks:
+
+- `GET /api/hub?dir=…` answers `{ hub: null }` when no hub answers
+  (`{ hub: null, disabled: true }` with `TOOL_HUB_URL=off`, which stops the
+  page asking again), or `{ hub: { url }, tool }`, where `tool` is
+  `{ id, name, emoji, running, port, url, self }` or `null` for a folder the
+  hub doesn't know. `running` is the hub's word: started by the hub, or
+  found listening from the tool's folder. `self` marks agentdeck's own
+  folder, whose Restart is the built-in one.
+- `POST /api/hub/restart { dir }` calls the hub's `POST /api/restart/<id>`
+  and answers `{ message }` with the hub's text; a hub that answers 404 to
+  that gets `stop` and then `start` instead, and the two messages joined.
+  Hub errors come back as `502`.
+
+The hub relays each running tool's port on this machine's Tailscale IP, so
+the tool and hub links are built with the host name the page used for
+agentdeck: `http://<same host>:<tool port>/` and
+`http://<same host>:<hub port>/#tool=<id>`. A `TOOL_HUB_URL` pointing at
+another machine uses that machine's name instead. The page asks for the
+status when the workspace changes and every 30 seconds while it is visible.
+
 ## Code layout
 
 - `server.mjs`: HTTP routes, device approval checks, projects.
@@ -357,6 +396,8 @@ the same device approval and same-site checks apply.
   list of skills.
 - `lib/actions.mjs`: the quick-action buttons; the restart itself is in
   `server.mjs`.
+- `lib/toolhub.mjs`: finding Tool Hub and the open workspace's tool in it,
+  for the project bar.
 - `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,
   `opencode.mjs`). The interface they implement is described in
   `lib/agents/index.mjs`; adding an agent means adding a file there and

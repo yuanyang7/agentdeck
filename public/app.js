@@ -164,7 +164,9 @@ async function loadProjects() {
 }
 
 function setProject(dir) {
+  const changed = dir !== ui.dir;
   ui.dir = dir;
+  if (changed) loadHub().catch(() => {}); // the project bar follows the workspace
   $('project').value = dir;
   if ($('project').value !== dir) {
     const o = document.createElement('option');
@@ -2031,18 +2033,25 @@ async function runAction(a, force = false) {
 // What a command printed, as a card above the composer on this device only.
 // Running the same action again replaces its card.
 function showActionResult(a, r) {
-  const box = $('action-results');
-  for (const old of box.children) if (old.actionId === a.id) old.remove();
-  const card = el('div', 'perm action-card' + (r.code === 0 ? '' : ' failed'));
-  card.actionId = a.id;
-  card.tabIndex = -1;
-  card.setAttribute('aria-label', `${a.label} result`);
-  card.appendChild(el('div', 'perm-kicker', 'QUICK ACTION'));
   const outcome = r.timedOut ? 'stopped after 60 s' : r.code === 0 ? 'done' : `failed (exit ${r.code})`;
-  card.appendChild(el('h4', '', `${a.label} · ${outcome} · ${(r.ms / 1000).toFixed(1)} s`));
-  card.appendChild(el('pre', '', r.output || '(no output)'));
-  if (r.restarting) card.appendChild(el('div', 'action-note', 'Restarting agentdeck…'));
-  else if (r.blocked) card.appendChild(el('div', 'action-note', `Not restarted: ${r.blocked}`));
+  const note = r.restarting ? 'Restarting agentdeck…' : r.blocked ? `Not restarted: ${r.blocked}` : '';
+  resultCard({ id: a.id, kicker: 'QUICK ACTION', label: a.label, title: `${a.label} · ${outcome} · ${(r.ms / 1000).toFixed(1)} s`,
+    output: r.output, failed: r.code !== 0, note });
+}
+
+// The card itself; the project bar's Restart uses it too. `id` names what
+// ran, so a new card for the same thing replaces the old one.
+function resultCard({ id, kicker, label, title, output, failed, note }) {
+  const box = $('action-results');
+  for (const old of box.children) if (old.actionId === id) old.remove();
+  const card = el('div', 'perm action-card' + (failed ? ' failed' : ''));
+  card.actionId = id;
+  card.tabIndex = -1;
+  card.setAttribute('aria-label', `${label} result`);
+  card.appendChild(el('div', 'perm-kicker', kicker));
+  card.appendChild(el('h4', '', title));
+  card.appendChild(el('pre', '', output || '(no output)'));
+  if (note) card.appendChild(el('div', 'action-note', note));
   const row = el('div', 'row');
   const close = el('button', '', 'Dismiss');
   close.type = 'button';
@@ -2085,6 +2094,94 @@ function awaitRestart() {
     restartTimer = setTimeout(check, 700);
   };
   restartTimer = setTimeout(check, 1000);
+}
+
+// ---------- project bar ----------
+
+// The open workspace's dev server, when Tool Hub (~/code/tool-hub) is running
+// and knows the folder: a status dot, Open while it's up, Restart through the
+// hub, and a link into the hub. Nothing shows without a hub. The status is
+// asked for when the workspace changes and every 30 s while the page is
+// visible; the server keeps its own answer from the hub for 30 s too.
+const HUB_REFRESH = 30_000;
+let hubState = { dir: null, hub: null, tool: null, disabled: false };
+let hubRestarting = false;
+
+async function loadHub() {
+  const dir = ui.dir;
+  if (!dir || hubState.disabled) return;
+  const r = await api('/api/hub?dir=' + encodeURIComponent(dir));
+  if (dir !== ui.dir) return;
+  hubState = { dir, hub: r.hub, tool: r.tool || null, disabled: !!r.disabled };
+  renderHub();
+}
+
+function renderHub() {
+  const bar = $('project-bar');
+  const { tool, hub } = hubState;
+  bar.classList.toggle('hidden', !tool);
+  if (!tool) {
+    bar.classList.remove('open');
+    $('project-bar-toggle').setAttribute('aria-expanded', 'false');
+    return;
+  }
+  const state = tool.running ? 'running' : 'stopped';
+  bar.classList.toggle('running', tool.running);
+  const name = `${tool.emoji ? tool.emoji + ' ' : ''}${tool.name}`;
+  for (const n of bar.querySelectorAll('.hub-name')) n.textContent = name;
+  bar.querySelector('.project-bar-label').title = `${tool.name}: ${state}`;
+  $('project-bar-toggle').setAttribute('aria-label', `${tool.name}: ${state}. Project menu`);
+  $('hub-open').classList.toggle('hidden', !tool.running || !tool.url);
+  $('hub-open').href = tool.url || '#';
+  $('hub-open').title = tool.url ? `Open ${tool.url}` : '';
+  $('hub-restart').disabled = hubRestarting;
+  $('hub-restart').classList.toggle('running', hubRestarting);
+  $('hub-restart').title = tool.self ? 'Restart agentdeck' : `Restart ${tool.name} through Tool Hub`;
+  $('hub-link').href = hub.url;
+  $('hub-link').title = 'Open in Tool Hub';
+}
+
+$('project-bar-toggle').addEventListener('click', () => {
+  const open = $('project-bar').classList.toggle('open');
+  $('project-bar-toggle').setAttribute('aria-expanded', String(open));
+});
+// A pick closes the phone menu.
+$('project-bar-menu').addEventListener('click', () => {
+  $('project-bar').classList.remove('open');
+  $('project-bar-toggle').setAttribute('aria-expanded', 'false');
+});
+
+$('hub-restart').addEventListener('click', async () => {
+  const { tool, dir } = hubState;
+  if (!tool || hubRestarting) return;
+  // agentdeck itself restarts the built-in way, which keeps every page in step.
+  if (tool.self) {
+    const restart = actionState.actions.find((a) => a.builtin);
+    if (restart) runAction(restart);
+    return;
+  }
+  if (!confirm(`Restart ${tool.name} through Tool Hub?`)) return;
+  hubRestarting = true;
+  renderHub();
+  try {
+    const r = await api('/api/hub/restart', { dir });
+    resultCard({ id: 'hub:' + tool.id, kicker: 'PROJECT', label: tool.name, title: `${tool.name} · restart`, output: r.message,
+      failed: /crash|missing|not running|not set up|in use/i.test(r.message) });
+  } catch (err) {
+    if (err.message !== 'not approved') resultCard({ id: 'hub:' + tool.id, kicker: 'PROJECT', label: tool.name, title: `${tool.name} · restart`, output: err.message, failed: true });
+  }
+  hubRestarting = false;
+  renderHub();
+  loadHub().catch(() => {});
+});
+
+function startHubPolling() {
+  setInterval(() => {
+    if (document.visibilityState === 'visible') loadHub().catch(() => {});
+  }, HUB_REFRESH);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') loadHub().catch(() => {});
+  });
 }
 
 // Settings dialog: the custom actions are edited as a draft and saved together.
@@ -2299,6 +2396,7 @@ async function start() {
   const h = readHash();
   const dir = h.dir || projects[0]?.dir;
   if (dir) setProject(dir);
+  startHubPolling();
   await loadSessions();
   if (h.s) await openConversation(h.agent, h.s);
   else newConversation();
