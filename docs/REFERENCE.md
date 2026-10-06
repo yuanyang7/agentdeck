@@ -470,6 +470,20 @@ reload in session storage. Anyone who can use agentdeck can run these
 commands, which is no more than an agent in a bypass mode can already do;
 the same device approval and same-site checks apply.
 
+### Running a code block
+
+A reply's fenced code block tagged `bash`, `sh`, `zsh`, `shell`, `console`,
+`shellsession` or `terminal` gets a **Run** button once the reply has
+finished streaming. If any line starts with `$ `, those lines (without the
+`$ `) are the command and the rest is output; otherwise the whole block is.
+The page asks with `confirm` (the command and the folder) and then sends
+`POST /api/run { command, dir }`, where `dir` is the open chat's folder. The
+server runs it exactly as a quick action's command (`runCommand`: same
+shell, environment, 60 s limit and 100 KB of output) and answers
+`{ code, output, timedOut, ms }`, shown in a card above the composer on that
+device; running the same command again replaces its card. Commands over
+10,000 characters and folders that don't exist are refused with `400`.
+
 ### Tool Hub
 
 [Tool Hub](https://github.com/yuanyang7/tool-hub) is a local control panel

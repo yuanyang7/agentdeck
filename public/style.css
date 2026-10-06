@@ -221,6 +221,9 @@ a.fl-queue.attention { border-color: var(--warn-border); background: var(--warn-
 .msg-assistant a { color: var(--accent); }
 .msg-assistant pre, .tool pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; overflow-x: auto; font-size: 12px; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+.msg-assistant .code-block { position: relative; margin: 1em 0; }
+.msg-assistant .code-block pre { margin: 0; padding-right: 64px; }
+.code-run { position: absolute; top: 7px; right: 7px; padding: 3px 10px; font-size: 11px; font-weight: 650; border-radius: 7px; }
 .msg-assistant :not(pre) > code { background: var(--code-bg); padding: 2px 5px; border-radius: 5px; }
 .msg-assistant table { display: block; border-collapse: collapse; overflow-x: auto; }
 .msg-assistant th, .msg-assistant td { border: 1px solid var(--border); padding: 6px 10px; }

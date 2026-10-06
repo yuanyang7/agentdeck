@@ -230,6 +230,12 @@ same buttons; on a phone, Restart stays in the header and ⚡ opens the rest.
 See [docs/REFERENCE.md](docs/REFERENCE.md#quick-actions) for how the
 restart works under a LaunchAgent or when started by hand.
 
+Shell code blocks in a reply (tagged `bash`, `sh`, `console` and the like)
+have a **Run** button. It asks first, showing the command and the
+folder, then runs it on the host in the chat's folder and shows what it
+printed in the same kind of card. In a block with `$ ` prompts only those
+lines run; the rest is taken as output.
+
 If [Tool Hub](https://github.com/yuanyang7/tool-hub) is running on the host
 and knows the open workspace, the header also shows a **project bar** for
 its dev server: a dot that is green while it runs, **Open** to visit it,

@@ -266,9 +266,10 @@ function restart() {
 
 const ACTION_TIMEOUT = 60_000;
 const MAX_OUTPUT = 100_000;
+const MAX_COMMAND = 10_000;
 
-// Runs a custom action's command in `cwd` through the user's shell and
-// collects what it prints: { code, output, timedOut, ms }.
+// Runs a quick action's or a code block's command in `cwd` through the
+// user's shell and collects what it prints: { code, output, timedOut, ms }.
 function runCommand(command, cwd) {
   return new Promise((resolve) => {
     const started = Date.now();
@@ -730,6 +731,17 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, { ...result, restarting, blocked });
       if (restarting) restart();
       return;
+    }
+
+    if (p === '/api/run' && req.method === 'POST') {
+      // A command from a reply's code block, run by the Run button the same
+      // way a quick action's command is, in the chat's folder. The page
+      // asks before sending it.
+      const { command, dir } = await readJson(req);
+      if (typeof command !== 'string' || !command.trim()) return send(res, 400, { error: 'No command to run.' });
+      if (command.length > MAX_COMMAND) return send(res, 400, { error: `Commands are limited to ${MAX_COMMAND.toLocaleString('en-US')} characters.` });
+      if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.existsSync(dir)) return send(res, 400, { error: 'Project folder not found' });
+      return send(res, 200, await runCommand(command, dir));
     }
 
     if (p === '/api/hub' && req.method === 'GET') {

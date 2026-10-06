@@ -737,6 +737,56 @@ function addMentionedImages(root) {
   }
 }
 
+// Shell code blocks in a reply (```bash, ```sh, ```console, …) get a Run
+// button. A console block's commands are its `$ ` lines; the rest is output.
+const SHELL_BLOCK = /\blanguage-(?:bash|sh|zsh|shell|console|shellsession|terminal)\b/;
+
+function shellCommand(text) {
+  const lines = text.replace(/\n$/, '').split('\n');
+  const prompted = lines.filter((l) => /^\$ /.test(l));
+  return (prompted.length ? prompted.map((l) => l.slice(2)) : lines).join('\n').trim();
+}
+
+function addRunButtons(root) {
+  for (const code of root.querySelectorAll('pre > code')) {
+    if (!SHELL_BLOCK.test(code.className)) continue;
+    const command = shellCommand(code.textContent);
+    if (!command) continue;
+    const pre = code.parentElement;
+    const wrap = el('div', 'code-block');
+    pre.replaceWith(wrap);
+    const b = el('button', 'code-run', 'Run');
+    b.type = 'button';
+    b.title = 'Run this on the host, in the chat\'s folder';
+    b.onclick = () => runSnippet(b, command);
+    wrap.append(pre, b);
+  }
+}
+
+// Asks first, since a reply can say anything, then runs it like a quick
+// action and shows what it printed in a card above the composer.
+async function runSnippet(button, command) {
+  const dir = ui.dir;
+  if (!dir) return alert('Pick a workspace first; the command runs in its folder.');
+  if (!confirm(`Run this in ${dir}?\n\n${command}`)) return;
+  button.disabled = true;
+  button.textContent = 'Running…';
+  const first = command.split('\n')[0];
+  const label = first.length > 48 ? first.slice(0, 47) + '…' : first;
+  const card = { id: 'run:' + command, kicker: 'COMMAND', label };
+  try {
+    const r = await api('/api/run', { command, dir });
+    const outcome = r.timedOut ? 'stopped after 60 s' : r.code === 0 ? 'done' : `failed (exit ${r.code})`;
+    resultCard({ ...card, title: `${label} · ${outcome} · ${(r.ms / 1000).toFixed(1)} s`,
+      output: r.output, failed: r.code !== 0 });
+  } catch (err) {
+    if (err.message !== 'not approved') resultCard({ ...card, title: `${label} · not run`, output: err.message, failed: true });
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Run';
+  }
+}
+
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -1016,7 +1066,10 @@ function renderItem(item, streaming) {
         if (img.closest('a')) continue;
         img.addEventListener('click', () => openImage(img.src));
       }
-      if (!streaming) addMentionedImages(d);
+      if (!streaming) {
+        addMentionedImages(d);
+        addRunButtons(d);
+      }
       return d;
     }
     case 'thinking': {
