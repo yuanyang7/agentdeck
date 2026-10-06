@@ -133,7 +133,7 @@ button.tag.on { background: var(--accent); color: var(--accent-text); border-col
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 .topbar { display: flex; align-items: center; gap: 15px; min-height: 73px; padding: 11px 28px; background: color-mix(in srgb, var(--card) 76%, var(--bg)); border-bottom: 1px solid var(--border); }
 .topbar .title { flex: 1; min-width: 0; }
-.topbar-eyebrow { line-height: 1.3; margin-bottom: 3px; }
+.topbar-eyebrow { line-height: 1.3; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #title { font-size: 16px; font-weight: 720; letter-spacing: -.025em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #subtitle { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #toggle-sidebar { display: none; }
@@ -170,6 +170,24 @@ a.hub-button { border: 1px solid var(--border); background: var(--card); border-
 a.hub-button:hover { border-color: var(--accent); }
 .hub-button span { color: var(--muted); }
 .hub-button.running { animation: action-pulse 1s ease-in-out infinite; }
+/* Feedback-loop: the bug queue (amber when something waits on you) and
+   Report. In a folder Tool Hub doesn't know there's no server dot: on phones
+   the toggle shows a 🐞 instead. */
+a.fl-queue.attention { border-color: var(--warn-border); background: var(--warn-bg); color: var(--warn-ink); }
+.fl-glyph { display: none; font-size: 14px; line-height: 1; }
+.project-bar.fl-only .project-bar-label, .project-bar.fl-only .hub-dot { display: none; }
+.project-bar.fl-only .fl-glyph { display: inline; }
+.project-bar.fl-attention .project-bar-toggle { border-color: var(--warn-border); background: var(--warn-bg); } /* folded, it still says something waits on you */
+/* A header with too little room for the whole bar (fitProjectBar in app.js)
+   folds it into a button with the project's name, and the buttons drop down
+   under it, as on phones. */
+.project-bar.compact { position: relative; }
+.project-bar.compact .project-bar-label { display: none; }
+.project-bar.compact .project-bar-toggle { display: inline-flex; }
+.project-bar.compact .project-bar-toggle[aria-expanded="true"] { border-color: var(--accent); }
+.project-bar.compact .project-bar-menu { display: none; position: absolute; z-index: 5; top: calc(100% + 8px); right: 0; width: max-content; max-width: min(480px, calc(100vw - 340px)); flex-wrap: wrap; padding: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+.project-bar.compact.open .project-bar-menu { display: flex; }
+.project-bar.compact .menu-name { display: block; flex-basis: 100%; font-size: 12px; font-weight: 650; }
 .messages { flex: 1; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 20px; padding: 30px max(28px, calc((100% - 880px) / 2)) 40px; scrollbar-width: thin; }
 .messages > * { flex: none; min-width: 0; width: 100%; }
 .empty { align-self: center; text-align: center; margin: auto 0; padding: 40px 16px 80px; }
@@ -304,6 +322,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .folder-name { flex: none; font-weight: 650; }
 .folder-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .tag-dialog select { width: 100%; margin-top: 12px; }
+.tag-dialog textarea { display: block; width: 100%; padding: 10px; font-size: 16px; resize: vertical; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+.report-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-top: 12px; }
+.report-field { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.tag-dialog .report-field select, .tag-dialog .report-field input { width: auto; margin: 0; }
+.report-field input { accent-color: var(--accent); }
 .device-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
 .device-text { flex: 1; min-width: 0; }
 .device-name { font-weight: 650; }

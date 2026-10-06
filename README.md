@@ -201,6 +201,14 @@ so they work from a phone on the tailnet too. On a phone the bar is just
 the dot; tap it for the three actions. Without a hub nothing is shown. See
 [docs/REFERENCE.md](docs/REFERENCE.md#tool-hub).
 
+If the workspace is enrolled in
+[feedback-loop](https://github.com/yuanyang7/feedback-loop) (it, or its repo,
+has `.feedback-loop/config.yml`), the bar also shows its bug queue, such as
+"🐞 2 need you", which opens the feedback dashboard, and **Report**, which
+files a bug as a GitHub issue for an agent to fix, optionally cleared for it
+to start on its own. This works whether or not Tool Hub knows the project.
+See [docs/REFERENCE.md](docs/REFERENCE.md#feedback-loop).
+
 ## More
 
 [docs/REFERENCE.md](docs/REFERENCE.md) covers:

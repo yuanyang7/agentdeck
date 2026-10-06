@@ -18,6 +18,8 @@ Detailed configuration and internals for agentdeck. Start with
 | `WORKSPACE_INDEX` | on                        | `off` stops giving agents the [workspace index](#workspace-index). |
 | `AGENTDECK_SUPERVISED` | detected               | `1` if something restarts agentdeck when it exits, `0` if nothing does; see [Quick actions](#quick-actions). |
 | `TOOL_HUB_URL`  | `http://127.0.0.1:8765`     | Where [Tool Hub](#tool-hub) answers, for the project bar; `off` disables it. |
+| `FEEDBACK_LOOP` | on                          | `off` hides the [feedback-loop](#feedback-loop) entries in the project bar. |
+| `FEEDBACK_LOOP_BIN` | `feedback-loop` on `PATH`, else in `/opt/homebrew/bin` or `/usr/local/bin` | feedback-loop CLI to run. |
 
 ```bash
 PASSWORD='something-long' npm start
@@ -380,6 +382,63 @@ agentdeck: `http://<same host>:<tool port>/` and
 another machine uses that machine's name instead. The page asks for the
 status when the workspace changes and every 30 seconds while it is visible.
 
+### feedback-loop
+
+[feedback-loop](https://github.com/yuanyang7/feedback-loop) turns bug
+reports into GitHub issues that an agent reproduces and fixes, stopping at a
+pull request. When the open workspace is enrolled in it, the project bar
+also shows the target's bug queue and a **Report** button, with or without
+Tool Hub. Elsewhere nothing shows, and so it does when the CLI isn't
+installed.
+
+A folder is enrolled when it, or a folder above it in the same git
+repository, has `.feedback-loop/config.yml`: a chat in
+`mini-games-hub/games/<game>` reports to `mini-games-hub`, while a nested
+repository with its own `.git` doesn't take its parent's. Everything goes
+through the CLI, run on agentdeck's own `node` with `/opt/homebrew/bin` and
+`/usr/local/bin` added to `PATH` (it calls `gh`):
+
+- `GET /api/feedback?dir=…` answers `{ feedback: null }` for a folder that
+  isn't enrolled (`{ feedback: null, disabled: true }` with
+  `FEEDBACK_LOOP=off`), or `{ feedback: { target, repo, sub, counts,
+  dashboard } }`. `counts` is `feedback-loop status <dir> --json`'s, or
+  `null` when that failed; the answer is kept 60 seconds per enrolled
+  folder and then refreshed in the background, so only the first ask
+  waits for it (about a second or two). `sub` is the chat's folder inside
+  the enrolled one, `''` at its top.
+- `POST /api/feedback/report { dir, title, body, severity, ready }` runs
+  `feedback-loop report <dir> --title … --body-file … --severity …
+  --source agentdeck --json` and answers its `{ number, url, target }`.
+  `severity` is `low`, `medium` (default) or `high`; `ready: true` adds
+  `--ready`, which applies `agent-ready`, the label that lets the loop pick
+  the issue up without being asked. A report from a subfolder gets a
+  `Folder:` line at the end of its body. CLI errors come back as `502`.
+
+The bar's queue shows its most pressing number: what needs you
+(`needsYou` + `needsInfo`, in amber), else what's being fixed, else open
+PRs, else what's queued (`agentReady` + `reproduced`); the tooltip lists
+them all. It links to the target's page on the feedback dashboard: the
+config's `dashboard.url` when set, else `feedback-loop dashboard --all` on
+port 7777, its default. A `localhost` name in either becomes the host name
+the page used, since the dashboard, like agentdeck, listens on the
+Tailscale address. **Report** opens a form (title, details, severity, "let
+the agent fix it") and shows the new issue in a card with a link to it.
+
+When the header is too narrow for the whole bar (the chat title would get
+less than 160 px), the bar folds into a button with the project's name and
+its buttons drop down under it, as on phones. A folder only feedback-loop
+knows shows a 🐞 there instead of the server dot, amber when something
+needs you.
+
+## Links into agentdeck
+
+The page keeps where you are in its address: `#dir=<folder>` opens that
+project, and `&a=<agent>&s=<session id>` opens one of its chats. Another
+local tool can hand a task over with `#dir=<folder>&prompt=<text>`: that
+opens a new chat in the folder with the text already in the composer, where
+you pick the agent, model and mode and send it yourself. Nothing is sent on
+its own, and the prompt leaves the address once the page has read it.
+
 ## Code layout
 
 - `server.mjs`: HTTP routes, device approval checks, projects.
@@ -398,6 +457,8 @@ status when the workspace changes and every 30 seconds while it is visible.
   `server.mjs`.
 - `lib/toolhub.mjs`: finding Tool Hub and the open workspace's tool in it,
   for the project bar.
+- `lib/feedbackloop.mjs`: whether the open workspace is in feedback-loop,
+  its bug queue, and filing reports through the CLI.
 - `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,
   `opencode.mjs`). The interface they implement is described in
   `lib/agents/index.mjs`; adding an agent means adding a file there and

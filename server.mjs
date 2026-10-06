@@ -26,6 +26,7 @@ import { rootFolders, checkFolders, mentionedFolders } from './lib/folders.mjs';
 import * as devices from './lib/devices.mjs';
 import * as actions from './lib/actions.mjs';
 import * as toolhub from './lib/toolhub.mjs';
+import * as feedbackloop from './lib/feedbackloop.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STARTED = Date.now(); // pages compare this to tell a restarted server from the old one
@@ -270,6 +271,28 @@ async function hubStatus(req, dir) {
       ...tool,
       url: tool.port ? `${base}:${tool.port}/` : '',
       self: sameFolder(dir, ROOT), // agentdeck itself: the page restarts it the built-in way
+    },
+  };
+}
+
+// ---------- project bar (feedback-loop) ----------
+
+// The bug queue of the open workspace's feedback-loop target
+// (lib/feedbackloop.mjs). `counts` is null while the CLI's answer is missing,
+// and Report still works then. `sub` is where the chat's folder sits inside
+// the enrolled one, '' at its top.
+async function feedbackStatus(req, dir) {
+  if (!feedbackloop.enabled) return { feedback: null, disabled: true };
+  const root = feedbackloop.enrolledRoot(dir);
+  if (!root || !feedbackloop.available()) return { feedback: null };
+  const s = await feedbackloop.status(root);
+  return {
+    feedback: {
+      target: s?.target || path.basename(root),
+      repo: s?.repo || '',
+      sub: path.relative(root, fs.realpathSync(dir)),
+      counts: s?.counts || null,
+      dashboard: feedbackloop.dashboardUrl(s, (req.headers.host || 'localhost').replace(/:\d+$/, '')),
     },
   };
 }
@@ -642,6 +665,37 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { message: await toolhub.restart(tool.id) });
       } catch (err) {
         return send(res, 502, { error: `Tool Hub: ${err.message}` });
+      }
+    }
+
+    if (p === '/api/feedback' && req.method === 'GET') {
+      // The project bar's bug queue, when the workspace is in feedback-loop.
+      const dir = url.searchParams.get('dir') || '';
+      if (!path.isAbsolute(dir) || !fs.existsSync(dir)) return send(res, 400, { error: 'Project folder not found' });
+      return send(res, 200, await feedbackStatus(req, dir));
+    }
+
+    if (p === '/api/feedback/report' && req.method === 'POST') {
+      // Files a bug against the workspace's feedback-loop target; answers
+      // `{ number, url, target }`.
+      const { dir, title, body = '', severity = 'medium', ready = false } = await readJson(req);
+      if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.existsSync(dir)) return send(res, 400, { error: 'Project folder not found' });
+      const root = feedbackloop.available() && feedbackloop.enrolledRoot(dir);
+      if (!root) return send(res, 404, { error: 'This folder is not in feedback-loop.' });
+      const t = typeof title === 'string' ? title.trim() : '';
+      if (!t || t.length > 200 || t.startsWith('--')) return send(res, 400, { error: t.startsWith('--') ? "A title can't start with --." : 'A title of up to 200 characters is needed.' });
+      if (typeof body !== 'string' || body.length > 20_000) return send(res, 400, { error: 'The details are too long.' });
+      if (!['low', 'medium', 'high'].includes(severity)) return send(res, 400, { error: 'Severity is low, medium or high.' });
+      const sub = path.relative(root, fs.realpathSync(dir));
+      try {
+        return send(res, 200, await feedbackloop.report(root, {
+          title: t,
+          body: sub ? `${body.trim()}\n\nFolder: \`${sub}\``.trim() : body.trim(),
+          severity,
+          ready: ready === true,
+        }));
+      } catch (err) {
+        return send(res, 502, { error: err.message });
       }
     }
 

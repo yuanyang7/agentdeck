@@ -55,14 +55,16 @@
           <div id="title">New conversation</div>
           <div id="subtitle" class="muted"></div>
         </div>
-        <div id="project-bar" class="project-bar hidden" role="group" aria-label="Project dev server">
+        <div id="project-bar" class="project-bar hidden" role="group" aria-label="Project">
           <span class="project-bar-label"><span class="hub-dot" aria-hidden="true"></span><span class="hub-name"></span></span>
-          <button id="project-bar-toggle" class="project-bar-toggle" type="button" aria-expanded="false" aria-controls="project-bar-menu"><span class="hub-dot" aria-hidden="true"></span><span class="hub-name"></span></button>
+          <button id="project-bar-toggle" class="project-bar-toggle" type="button" aria-expanded="false" aria-controls="project-bar-menu"><span class="hub-dot" aria-hidden="true"></span><span class="fl-glyph" aria-hidden="true">🐞</span><span class="hub-name"></span></button>
           <div id="project-bar-menu" class="project-bar-menu">
             <span class="hub-name menu-name"></span>
             <a id="hub-open" class="action-button hub-button" target="_blank" rel="noopener">Open <span aria-hidden="true">↗</span></a>
             <button id="hub-restart" class="action-button hub-button" type="button">Restart</button>
             <a id="hub-link" class="action-button hub-button" target="_blank" rel="noopener">Hub <span aria-hidden="true">↗</span></a>
+            <a id="fl-queue" class="action-button hub-button fl-queue" target="_blank" rel="noopener"></a>
+            <button id="fl-report" class="action-button hub-button" type="button">Report</button>
           </div>
         </div>
         <span id="status" class="status"></span>
@@ -159,6 +161,26 @@
       <div class="tag-actions">
         <button type="button" id="settings-cancel">Cancel</button>
         <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="report-dialog" class="tag-dialog">
+    <form method="dialog" id="report-form">
+      <h2>Report a bug</h2>
+      <p class="muted folder-hint">Files an issue in <strong id="report-repo"></strong> through feedback-loop<span id="report-sub"></span>. An agent can reproduce and fix it, stopping at a pull request for you to merge.</p>
+      <input id="report-title" type="text" maxlength="200" placeholder="What's wrong, in one line" autocomplete="off" required>
+      <textarea id="report-body" rows="5" placeholder="What happened, and how to see it"></textarea>
+      <div class="report-row">
+        <label class="report-field">Severity
+          <select id="report-severity"><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option></select>
+        </label>
+        <label class="report-field"><input id="report-ready" type="checkbox"> Let the agent fix it</label>
+      </div>
+      <p id="report-error" class="error"></p>
+      <div class="tag-actions">
+        <button type="button" id="report-cancel">Cancel</button>
+        <button type="submit" class="primary" id="report-submit">File</button>
       </div>
     </form>
   </dialog>

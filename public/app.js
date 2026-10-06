@@ -166,7 +166,7 @@ async function loadProjects() {
 function setProject(dir) {
   const changed = dir !== ui.dir;
   ui.dir = dir;
-  if (changed) loadHub().catch(() => {}); // the project bar follows the workspace
+  if (changed) loadProjectBar(); // the project bar follows the workspace
   $('project').value = dir;
   if ($('project').value !== dir) {
     const o = document.createElement('option');
@@ -2041,7 +2041,7 @@ function showActionResult(a, r) {
 
 // The card itself; the project bar's Restart uses it too. `id` names what
 // ran, so a new card for the same thing replaces the old one.
-function resultCard({ id, kicker, label, title, output, failed, note }) {
+function resultCard({ id, kicker, label, title, output, failed, note, link }) {
   const box = $('action-results');
   for (const old of box.children) if (old.actionId === id) old.remove();
   const card = el('div', 'perm action-card' + (failed ? ' failed' : ''));
@@ -2053,6 +2053,13 @@ function resultCard({ id, kicker, label, title, output, failed, note }) {
   card.appendChild(el('pre', '', output || '(no output)'));
   if (note) card.appendChild(el('div', 'action-note', note));
   const row = el('div', 'row');
+  if (link) {
+    const a = el('a', 'action-button hub-button', link.text);
+    a.href = link.href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    row.appendChild(a);
+  }
   const close = el('button', '', 'Dismiss');
   close.type = 'button';
   close.onclick = () => card.remove();
@@ -2100,12 +2107,22 @@ function awaitRestart() {
 
 // The open workspace's dev server, when Tool Hub (~/code/tool-hub) is running
 // and knows the folder: a status dot, Open while it's up, Restart through the
-// hub, and a link into the hub. Nothing shows without a hub. The status is
-// asked for when the workspace changes and every 30 s while the page is
-// visible; the server keeps its own answer from the hub for 30 s too.
+// hub, and a link into the hub. Beside it, when the workspace is in
+// feedback-loop (~/code/feedback-loop): its bug queue, linking to the
+// feedback dashboard, and Report. Nothing shows when neither applies. Both
+// are asked for when the workspace changes and every 30 s while the page is
+// visible; the server keeps the hub's answer for 30 s and feedback-loop's
+// for 60 s.
 const HUB_REFRESH = 30_000;
 let hubState = { dir: null, hub: null, tool: null, disabled: false };
+let fbState = { dir: null, feedback: null, disabled: false };
 let hubRestarting = false;
+
+function loadProjectBar() {
+  renderProjectBar(); // drops the last workspace's entries straight away
+  loadHub().catch(() => {});
+  loadFeedback().catch(() => {});
+}
 
 async function loadHub() {
   const dir = ui.dir;
@@ -2113,32 +2130,104 @@ async function loadHub() {
   const r = await api('/api/hub?dir=' + encodeURIComponent(dir));
   if (dir !== ui.dir) return;
   hubState = { dir, hub: r.hub, tool: r.tool || null, disabled: !!r.disabled };
-  renderHub();
+  renderProjectBar();
 }
 
-function renderHub() {
+async function loadFeedback() {
+  const dir = ui.dir;
+  if (!dir || fbState.disabled) return;
+  const r = await api('/api/feedback?dir=' + encodeURIComponent(dir));
+  if (dir !== ui.dir) return;
+  fbState = { dir, feedback: r.feedback || null, disabled: !!r.disabled };
+  renderProjectBar();
+}
+
+function renderProjectBar() {
   const bar = $('project-bar');
-  const { tool, hub } = hubState;
-  bar.classList.toggle('hidden', !tool);
-  if (!tool) {
+  const tool = hubState.dir === ui.dir ? hubState.tool : null;
+  const fb = fbState.dir === ui.dir ? fbState.feedback : null;
+  bar.classList.toggle('hidden', !tool && !fb);
+  if (!tool && !fb) {
     bar.classList.remove('open');
     $('project-bar-toggle').setAttribute('aria-expanded', 'false');
     return;
   }
-  const state = tool.running ? 'running' : 'stopped';
-  bar.classList.toggle('running', tool.running);
-  const name = `${tool.emoji ? tool.emoji + ' ' : ''}${tool.name}`;
+  // Without a tool there's no server to show, so no dot: the toggle is a 🐞.
+  bar.classList.toggle('fl-only', !tool);
+  bar.classList.toggle('running', !!tool?.running);
+  const name = tool ? `${tool.emoji ? tool.emoji + ' ' : ''}${tool.name}` : fb.target;
   for (const n of bar.querySelectorAll('.hub-name')) n.textContent = name;
-  bar.querySelector('.project-bar-label').title = `${tool.name}: ${state}`;
-  $('project-bar-toggle').setAttribute('aria-label', `${tool.name}: ${state}. Project menu`);
-  $('hub-open').classList.toggle('hidden', !tool.running || !tool.url);
-  $('hub-open').href = tool.url || '#';
-  $('hub-open').title = tool.url ? `Open ${tool.url}` : '';
-  $('hub-restart').disabled = hubRestarting;
-  $('hub-restart').classList.toggle('running', hubRestarting);
-  $('hub-restart').title = tool.self ? 'Restart agentdeck' : `Restart ${tool.name} through Tool Hub`;
-  $('hub-link').href = hub.url;
-  $('hub-link').title = 'Open in Tool Hub';
+  for (const id of ['hub-open', 'hub-restart', 'hub-link']) $(id).classList.toggle('hidden', !tool);
+  if (tool) {
+    const state = tool.running ? 'running' : 'stopped';
+    bar.querySelector('.project-bar-label').title = `${tool.name}: ${state}`;
+    $('project-bar-toggle').setAttribute('aria-label', `${tool.name}: ${state}. Project menu`);
+    $('hub-open').classList.toggle('hidden', !tool.running || !tool.url);
+    $('hub-open').href = tool.url || '#';
+    $('hub-open').title = tool.url ? `Open ${tool.url}` : '';
+    $('hub-restart').disabled = hubRestarting;
+    $('hub-restart').classList.toggle('running', hubRestarting);
+    $('hub-restart').title = tool.self ? 'Restart agentdeck' : `Restart ${tool.name} through Tool Hub`;
+    $('hub-link').href = hubState.hub.url;
+    $('hub-link').title = 'Open in Tool Hub';
+  } else {
+    $('project-bar-toggle').setAttribute('aria-label', `${fb.target}: bug reports. Project menu`);
+  }
+  renderFeedback(fb);
+  fitProjectBar();
+}
+
+// On a wide screen the bar is laid out in full while the chat's title keeps
+// room beside it; a crowded header (a long name, quick actions, Tool Hub and
+// feedback-loop together) folds it into the phone's menu. The title takes
+// whatever the rest leaves, so its width changing is the cue to look again.
+const PHONE = matchMedia('(max-width: 760px)');
+const TITLE_ROOM = 160;
+
+function fitProjectBar() {
+  const bar = $('project-bar');
+  const wasCompact = bar.classList.contains('compact');
+  bar.classList.remove('compact');
+  if (PHONE.matches || bar.classList.contains('hidden')) return;
+  const compact = document.querySelector('.topbar .title').clientWidth < TITLE_ROOM;
+  bar.classList.toggle('compact', compact);
+  if (wasCompact && !compact) {
+    bar.classList.remove('open');
+    $('project-bar-toggle').setAttribute('aria-expanded', 'false');
+  }
+}
+
+new ResizeObserver(() => requestAnimationFrame(fitProjectBar)).observe(document.querySelector('.topbar .title'));
+
+// The queue as its most pressing number (what waits on you, then what's
+// moving, then what's queued); the tooltip has the rest. `counts` is null
+// until feedback-loop has answered once.
+function renderFeedback(fb) {
+  $('fl-queue').classList.toggle('hidden', !fb);
+  $('fl-report').classList.toggle('hidden', !fb);
+  $('project-bar').classList.remove('fl-attention');
+  if (!fb) return;
+  const c = fb.counts;
+  const waiting = c ? c.needsYou + c.needsInfo : 0;
+  const parts = c ? [
+    waiting && `${waiting} need${waiting === 1 ? 's' : ''} you`,
+    c.inProgress && `${c.inProgress} fixing`,
+    c.prReady && `${c.prReady} PR${c.prReady === 1 ? '' : 's'}`,
+    c.agentReady + c.reproduced && `${c.agentReady + c.reproduced} queued`,
+  ].filter(Boolean) : [];
+  const q = $('fl-queue');
+  q.replaceChildren(`🐞 ${parts[0] || (c ? 'No bugs' : 'Bugs')}`);
+  q.classList.toggle('attention', waiting > 0);
+  $('project-bar').classList.toggle('fl-attention', waiting > 0);
+  if (fb.dashboard) {
+    const arrow = el('span', '', '↗');
+    arrow.setAttribute('aria-hidden', 'true');
+    q.href = fb.dashboard;
+    q.append(' ', arrow);
+  } else q.removeAttribute('href');
+  q.title = [`feedback-loop${fb.repo ? ' · ' + fb.repo : ''}`, parts.join(' · ') || (c ? 'No open bugs' : ''), fb.dashboard && 'Open the dashboard']
+    .filter(Boolean).join('\n');
+  $('fl-report').title = `File a bug${fb.repo ? ' in ' + fb.repo : ''} through feedback-loop`;
 }
 
 $('project-bar-toggle').addEventListener('click', () => {
@@ -2162,7 +2251,7 @@ $('hub-restart').addEventListener('click', async () => {
   }
   if (!confirm(`Restart ${tool.name} through Tool Hub?`)) return;
   hubRestarting = true;
-  renderHub();
+  renderProjectBar();
   try {
     const r = await api('/api/hub/restart', { dir });
     resultCard({ id: 'hub:' + tool.id, kicker: 'PROJECT', label: tool.name, title: `${tool.name} · restart`, output: r.message,
@@ -2171,16 +2260,60 @@ $('hub-restart').addEventListener('click', async () => {
     if (err.message !== 'not approved') resultCard({ id: 'hub:' + tool.id, kicker: 'PROJECT', label: tool.name, title: `${tool.name} · restart`, output: err.message, failed: true });
   }
   hubRestarting = false;
-  renderHub();
+  renderProjectBar();
   loadHub().catch(() => {});
+});
+
+// Report: a bug filed through feedback-loop against the open workspace. The
+// form keeps what was typed until it's filed, so Cancel loses nothing.
+$('fl-report').addEventListener('click', () => {
+  const fb = fbState.dir === ui.dir ? fbState.feedback : null;
+  if (!fb) return;
+  $('report-repo').textContent = fb.repo || fb.target;
+  $('report-sub').textContent = fb.sub ? `, noting the folder ${fb.sub}` : '';
+  $('report-error').textContent = '';
+  $('report-dialog').showModal();
+  $('report-title').focus();
+});
+
+$('report-cancel').addEventListener('click', () => $('report-dialog').close());
+
+$('report-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const dir = ui.dir;
+  const fb = fbState.dir === dir ? fbState.feedback : null;
+  const ready = $('report-ready').checked;
+  $('report-error').textContent = '';
+  $('report-submit').disabled = true;
+  $('report-submit').textContent = 'Filing…';
+  try {
+    const r = await api('/api/feedback/report', {
+      dir,
+      title: $('report-title').value,
+      body: $('report-body').value,
+      severity: $('report-severity').value,
+      ready,
+    });
+    $('report-dialog').close();
+    $('report-form').reset();
+    resultCard({ id: `report:${r.number}`, kicker: 'FEEDBACK LOOP', label: `Issue #${r.number}`,
+      title: `Filed #${r.number}${fb?.repo ? ' in ' + fb.repo : ''}`,
+      output: ready ? 'Cleared for the agent: the loop can pick it up and open a pull request.' : 'Waiting for you to clear it for the agent, from the dashboard or GitHub.',
+      link: r.url && { href: r.url, text: 'Open issue' } });
+    loadFeedback().catch(() => {});
+  } catch (err) {
+    if (err.message !== 'not approved') $('report-error').textContent = err.message;
+  }
+  $('report-submit').disabled = false;
+  $('report-submit').textContent = 'File';
 });
 
 function startHubPolling() {
   setInterval(() => {
-    if (document.visibilityState === 'visible') loadHub().catch(() => {});
+    if (document.visibilityState === 'visible') loadProjectBar();
   }, HUB_REFRESH);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') loadHub().catch(() => {});
+    if (document.visibilityState === 'visible') loadProjectBar();
   });
 }
 
