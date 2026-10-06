@@ -397,6 +397,8 @@ body.stats-open { overflow: hidden; }
 .st-card-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
 .st-card-head h3 { margin: 0; font-size: 14px; }
 .st-card-head .muted { font-size: 12px; }
+.st-toggle { display: flex; gap: 4px; margin-left: auto; }
+.st-toggle .st-chip { font-size: 11px; padding: 3px 9px; }
 .st-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .st-plot svg { display: block; }
 .st-grid { stroke: var(--border); stroke-width: 1; }

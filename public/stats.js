@@ -21,6 +21,7 @@
     loading: null,
     days: 30,
     agents: new Set(), // empty = all
+    modelBy: 'replies', // or 'tout': what the Models bars measure
   };
 
   const DAY = 86400_000;
@@ -338,22 +339,34 @@
       m.tout += r.tout;
       byModel.set(r.model, m);
     }
-    const models = [...byModel.entries()].sort((a, b) => b[1].replies - a[1].replies);
+    const by = st.modelBy;
+    const unit = by === 'tout' ? 'tokens out' : 'replies';
+    const models = [...byModel.entries()].sort((a, b) => b[1][by] - a[1][by]);
     const topModels = models.slice(0, 8).map(([m, v]) => ({
       label: modelName(m),
-      value: v.replies,
+      value: v[by],
       color: agentColor(v.agent),
-      detail: [['tokens out', compact(v.tout)], ['agent', agentName(v.agent)]],
+      detail: [by === 'tout' ? ['replies', fmt(v.replies)] : ['tokens out', compact(v.tout)], ['agent', agentName(v.agent)]],
     }));
     if (models.length > 8) {
       topModels.push({
         label: `Other (${models.length - 8})`,
-        value: models.slice(8).reduce((s, [, v]) => s + v.replies, 0),
+        value: models.slice(8).reduce((s, [, v]) => s + v[by], 0),
         color: 'var(--muted)',
       });
     }
-    const mc = card('Models', 'replies per model');
-    mc.appendChild(barList(topModels, 'replies'));
+    const mc = card('Models', `${unit} per model`);
+    const toggle = el('div', 'st-toggle');
+    for (const [key, label] of [['replies', 'Replies'], ['tout', 'Tokens']]) {
+      const b = el('button', 'st-chip' + (by === key ? ' on' : ''), label);
+      b.onclick = () => {
+        st.modelBy = key;
+        render();
+      };
+      toggle.appendChild(b);
+    }
+    mc.firstChild.appendChild(toggle);
+    mc.appendChild(barList(topModels, unit));
     mc.appendChild(tableView(['Model', 'Replies', 'Tokens out', 'Agent'], models.map(([m, v]) => [modelName(m), fmt(v.replies), compact(v.tout), agentName(v.agent)])));
     pair.appendChild(mc);
 

@@ -191,9 +191,10 @@ with the page, so the first click or key press after opening arms it.
 
 **Stats**, at the bottom of the sidebar, opens a usage page built from what
 the agents already keep on disk: activity over time as prompts per day
-stacked by agent, a weekday-by-hour heatmap of when you work, replies per
-model and prompts per project, with tiles for conversations, prompts, tokens
-generated and active days in the chosen range. Filter by range (7/30/90 days
+stacked by agent, a weekday-by-hour heatmap of when you work, replies or
+output tokens per model (a switch on the card) and prompts per project, with
+tiles for conversations, prompts, tokens generated and active days in the
+chosen range. Filter by range (7/30/90 days
 or all time) or by agent; every chart also has a table view. It covers all
 chats on the machine, not just ones started in agentdeck. The first scan
 reads every transcript and can take a few seconds; after that only changed
