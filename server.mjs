@@ -28,6 +28,7 @@ import * as actions from './lib/actions.mjs';
 import * as toolhub from './lib/toolhub.mjs';
 import { routeTask, MODEL as ROUTE_MODEL } from './lib/router.mjs';
 import * as feedbackloop from './lib/feedbackloop.mjs';
+import { collect as collectStats } from './lib/stats.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STARTED = Date.now(); // pages compare this to tell a restarted server from the old one
@@ -411,6 +412,7 @@ async function listConversations(dir) {
 const STATIC = {
   '/': ['public/index.html', 'text/html; charset=utf-8'],
   '/app.js': ['public/app.js', 'text/javascript; charset=utf-8'],
+  '/stats.js': ['public/stats.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['public/style.css', 'text/css; charset=utf-8'],
   '/agentdeck-icon.png': ['public/agentdeck-icon.png', 'image/png'],
   '/favicon.png': ['public/favicon.png', 'image/png'],
@@ -754,6 +756,14 @@ const server = http.createServer(async (req, res) => {
       // and .codex/skills; `/name` runs the first.
       const list = backend.commands ? await backend.commands(dir) : [];
       return send(res, 200, list.filter((c, i) => list.findIndex((x) => x.name === c.name) === i));
+    }
+
+    if (p === '/api/stats') {
+      // The stats page: every agent's activity on this machine, in hour
+      // buckets the browser slices itself (lib/stats.mjs). The first call
+      // scans all transcripts and can take a few seconds; after that only
+      // changed files are read.
+      return send(res, 200, await collectStats());
     }
 
     if (p === '/api/usage') {

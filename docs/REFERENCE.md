@@ -352,6 +352,49 @@ Browsers block audio until the page has been interacted with, and suspend it
 again when a phone locks or a tab sleeps, so every click and key press on the
 page wakes the sound up. A page that has only ever been scrolled stays silent.
 
+## Stats
+
+**Stats** in the sidebar footer opens a page of usage charts, built by
+`lib/stats.mjs` from what the agents already keep on disk — nothing new is
+recorded, and chats from terminals and desktop apps count too:
+
+- Claude Code: the transcripts in `~/.claude/projects/*/*.jsonl` (or
+  `$CLAUDE_CONFIG_DIR/projects`). Prompts are user entries that aren't tool
+  results, meta lines or subagent internals; replies, models and tokens come
+  from assistant entries, deduplicated by API message id because a transcript
+  writes one line per content block. Error placeholders (`<synthetic>`) are
+  skipped. Chats in the Claude desktop app's temporary scratch folders are
+  left out, as they are in the sidebar.
+- Codex: the rollout files in `~/.codex/sessions` (or
+  `$CODEX_HOME/sessions`). The model comes from each turn's `turn_context`;
+  prompts skip the context blocks Codex injects (they start with a tag);
+  tokens come from `token_count` events, with cached input subtracted.
+- opencode: `~/.local/share/opencode/opencode.db`, read directly with
+  `node:sqlite` (Node 22+; on older Node, opencode is simply missing from the
+  page). Subagent sessions are left out.
+
+`GET /api/stats` answers `{ rows, sessions, at }`: rows are hour buckets
+(`t, agent, dir, model, prompts, replies, tin, tout`; `tin` is fresh input
+tokens, `tout` output tokens) and sessions are one `{ t, agent, dir }` per
+conversation. All slicing — the range and agent filters, days, weekday×hour,
+models, projects — happens in the page (`public/stats.js`), so filters never
+refetch. Tokens are what each agent records, so they're a floor, not a bill:
+Claude subagent turns and cache reads aren't included.
+
+The transcript folders hold gigabytes, so files are scanned line by line with
+cheap string checks rather than JSON-parsing every line, and each file's
+buckets are cached by mtime and size in `~/.agentdeck/stats-cache.json`. The
+first scan reads everything (a few seconds per gigabyte); after that only new
+or appended files are read, and **Refresh** rescans while keeping the old
+render on screen. Deleting the cache file just makes the next scan a full
+one.
+
+Times are bucketed by hour in UTC and rendered in the browser's time zone, so
+the time-of-day heatmap is local to whoever is looking. The agent colors are
+fixed (Claude Code purple, Codex orange, opencode green) and don't shift when
+filters hide a series; every chart's numbers are also in its "View as table"
+fold.
+
 ## Quick actions
 
 The buttons at the right end of the header. **Restart** is built in; the
@@ -509,6 +552,8 @@ its own, and the prompt leaves the address once the page has read it.
   for the project bar.
 - `lib/feedbackloop.mjs`: whether the open workspace is in feedback-loop,
   its bug queue, and filing reports through the CLI.
+- `lib/stats.mjs`: the Stats page's data, scanned from the agents' own files
+  into hour buckets and cached per file; `public/stats.js` renders it.
 - `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,
   `opencode.mjs`). The interface they implement is described in
   `lib/agents/index.mjs`; adding an agent means adding a file there and
