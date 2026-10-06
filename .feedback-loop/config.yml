@@ -1,0 +1,41 @@
+# feedback-loop — target configuration for agentdeck.
+# No secrets here. No Discord: reports arrive through `feedback-loop report`,
+# the /report-bug skill inside an agentdeck chat, Tool Hub's Report button,
+# or GitHub issues.
+
+target:
+  name: agentdeck
+  repo: yuanyang7/agentdeck
+  baseBranch: main
+
+discord: null
+
+github:
+  titlePrefix: "[feedback]"
+  labels:
+    source: feedback
+    agentReady: agent-ready
+    needsDecision: needs-decision
+
+intake:
+  backend: cli
+  model: claude-sonnet-5-5
+  minConfidence: 0.7
+  lookbackLimit: 100
+
+worker:
+  # agentdeck is the tool the fix runs are watched from, so a bad change
+  # costs more than in a game. Only urgent or small issues start unasked.
+  auto: urgent-or-easy
+  maxOpenPRs: 2
+  maxRunsPerDay: 6
+  dailyBudgetUsd: 10
+  maxFixAttempts: 2
+  denyPaths:
+    - lib/devices.mjs
+    - approve.mjs
+    - .github/
+    - .feedback-loop/
+
+agentdeck:
+  url: http://localhost:7878

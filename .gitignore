@@ -1,2 +1,6 @@
 node_modules/
 .env
+
+# feedback-loop worker worktrees and hand-off notes
+.worktrees/
+HANDOFF.md
