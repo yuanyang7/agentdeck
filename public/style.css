@@ -321,6 +321,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .u-fill { height: 100%; background: var(--accent); }
 .u-fill.hot { background: var(--danger); }
 .u-pct { color: var(--muted); white-space: nowrap; }
+.usage-alerts:empty { display: none; }
+.usage-alert { display: flex; align-items: center; gap: 10px; padding: 9px max(28px, calc((100% - 880px) / 2)); border-bottom: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-ink); font-size: 12px; }
+.usage-alert span { flex: 1; }
+.usage-alert button { flex: none; border: 0; background: transparent; color: var(--warn-ink); font-size: 16px; line-height: 1; padding: 2px 6px; }
 .tag-dialog { border: 1px solid var(--border); border-radius: 18px; background: var(--card); color: var(--text); width: min(420px, calc(100vw - 32px)); padding: 24px; box-shadow: var(--shadow); }
 .tag-dialog::backdrop { background: rgba(22, 26, 42, .52); }
 .tag-dialog h2 { margin: 0 0 14px; font-size: 18px; }
@@ -477,7 +481,7 @@ body.stats-open { overflow: hidden; }
   .empty { padding-bottom: 50px; }
   .empty-mark { width: 56px; height: 56px; }
   .msg-user { max-width: 90%; }
-  .pending, .queue, .usage { padding-left: 14px; padding-right: 14px; }
+  .pending, .queue, .usage, .usage-alert { padding-left: 14px; padding-right: 14px; }
   .queued { max-width: 94%; }
   .composer { padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); }
   .command-menu { left: 10px; right: 10px; }

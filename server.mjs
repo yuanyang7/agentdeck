@@ -569,6 +569,29 @@ async function chatSettings(backend, sessionId, dir) {
   return settingsOf(backend.id, sessionId);
 }
 
+// Weekly plan limits about to reset with much of them unused, across every
+// agent, so the browser can say "use it or lose it". Checked at most every
+// ten minutes, since asking Claude spawns a process.
+const ALERT_WITHIN = 24 * 3600_000; // resets within a day
+const ALERT_LEFT = 40; // with at least this percent unused
+let alertsCache = { at: 0, data: null };
+
+async function usageAlerts() {
+  if (alertsCache.data && Date.now() - alertsCache.at < 600_000) return alertsCache.data;
+  const now = Date.now();
+  const per = await Promise.all((await availableBackends()).filter((b) => b.usage).map(async (b) => {
+    const { limits } = await b.usage().catch(() => ({ limits: [] }));
+    return limits
+      .filter((l) => /7-day|weekly/i.test(l.label) && l.resetsAt && l.percent != null)
+      // To the minute: Claude's reset time drifts by fractions of a second.
+      .map((l) => ({ ...l, resetsAt: Math.round(new Date(l.resetsAt).getTime() / 60_000) * 60_000 }))
+      .filter((l) => l.resetsAt > now && l.resetsAt - now <= ALERT_WITHIN && 100 - l.percent >= ALERT_LEFT)
+      .map((l) => ({ agent: b.id, agentLabel: b.label, label: l.label, percent: l.percent, resetsAt: l.resetsAt }));
+  }));
+  alertsCache = { at: Date.now(), data: { alerts: per.flat() } };
+  return alertsCache.data;
+}
+
 async function backendFor(agent) {
   const b = backends.get(agent);
   if (!b || !(await availableBackends()).includes(b)) return null;
@@ -830,6 +853,10 @@ const server = http.createServer(async (req, res) => {
       const backend = await backendFor(url.searchParams.get('agent') || 'claude');
       if (!backend?.usage) return send(res, 404, { error: 'No usage for this agent' });
       return send(res, 200, await backend.usage());
+    }
+
+    if (p === '/api/usage-alerts') {
+      return send(res, 200, await usageAlerts());
     }
 
     if (p === '/api/file' && req.method === 'GET') {

@@ -2253,6 +2253,46 @@ $('toggle-usage').addEventListener('click', () => {
   if (!box.classList.contains('hidden')) loadUsage();
 });
 
+// A weekly limit of any agent that resets within a day with much of it
+// unused gets a banner, until dismissed for that window.
+const USAGE_ALERT_REFRESH = 15 * 60_000;
+
+function dismissedAlerts() {
+  try { return JSON.parse(localStorage.getItem('cw_usage_alerts_dismissed')) || {}; } catch { return {}; }
+}
+
+async function loadUsageAlerts() {
+  const { alerts } = await api('/api/usage-alerts').catch(() => ({ alerts: [] }));
+  const now = Date.now();
+  const dismissed = Object.fromEntries(Object.entries(dismissedAlerts()).filter(([, until]) => until > now));
+  localStorage.setItem('cw_usage_alerts_dismissed', JSON.stringify(dismissed));
+  const box = $('usage-alerts');
+  box.innerHTML = '';
+  for (const a of alerts) {
+    const id = `${a.agent}:${a.label}:${a.resetsAt}`;
+    if (dismissed[id]) continue;
+    const hours = Math.max(1, Math.round((a.resetsAt - now) / 3600_000));
+    const row = el('div', 'usage-alert');
+    row.appendChild(el('span', '', `${a.agentLabel} ${a.label} limit resets in ${hours}h with ${Math.round(100 - a.percent)}% still unused.`));
+    const close = el('button', '', '×');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Dismiss');
+    close.addEventListener('click', () => {
+      localStorage.setItem('cw_usage_alerts_dismissed', JSON.stringify({ ...dismissedAlerts(), [id]: a.resetsAt }));
+      row.remove();
+    });
+    row.appendChild(close);
+    box.appendChild(row);
+  }
+}
+
+function startUsageAlerts() {
+  loadUsageAlerts();
+  setInterval(() => {
+    if (document.visibilityState === 'visible') loadUsageAlerts();
+  }, USAGE_ALERT_REFRESH);
+}
+
 // ---------- quick actions ----------
 
 // One-click buttons in the header. Restart is built in; the rest are shell
@@ -2824,6 +2864,7 @@ async function start() {
   const dir = h.dir || projects[0]?.dir;
   if (dir) setProject(dir);
   startHubPolling();
+  startUsageAlerts();
   await loadSessions();
   if (h.s) await openConversation(h.agent, h.s);
   else {
