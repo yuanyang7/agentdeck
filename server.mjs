@@ -998,6 +998,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { text: message.text, images: message.images });
     }
 
+    if (p === '/api/stop-task' && req.method === 'POST') {
+      // Stops one background task of the running turn (see lib/hub.mjs).
+      const { key, id } = await readJson(req);
+      if (!(await hub.stopTask(key, id))) return send(res, 404, { error: 'That task already ended.' });
+      return send(res, 200, { ok: true });
+    }
+
     if (p === '/api/send-now' && req.method === 'POST') {
       // Stops the running turn and starts this queued message next.
       const { key, id } = await readJson(req);

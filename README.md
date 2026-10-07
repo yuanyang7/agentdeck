@@ -125,7 +125,12 @@ in order as each turn finishes. A queued message can be sent now (stopping
 the current turn so it runs next), edited (taken back into the message box),
 or removed before it starts. **Stop** ends the current
 turn and clears the queue, putting the queued messages back into the message
-box of the device that pressed it. Permission
+box of the device that pressed it. While a Claude Code turn runs, shells,
+monitors and subagents it left running in the background are listed above the
+composer under **In the background**, each with a **Stop** button. They live
+in the agent's process, which exits when the turn ends, so anything still
+running then (a dev server, a `tail -f`) is stopped, and the chat says so
+with a "Stopped when the turn ended" line. Permission
 prompts (file edits, shell commands, plan approval, questions) appear on
 every connected device, and whichever answers first wins. Avoid keeping the
 same conversation open here and in a terminal, desktop app, or opencode TUI
