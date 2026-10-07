@@ -8,6 +8,7 @@ const ui = {
   key: null, // live key: 'agent:sessionId', or a temp 'new-…' key while starting
   sessionId: null,
   running: false,
+  waiting: false, // the reply is done; background tasks it left still run
   mode: null, // mode reported by the live conversation, if any
   settings: null, // { model, effort, mode, dirs } the open chat uses, as stored on the server
   draftDirs: [], // extra folders picked for a new chat before its first message
@@ -1189,6 +1190,7 @@ function applyStatus(st) {
   renderQueue();
   ui.tasks = st.tasks || [];
   renderTasks();
+  ui.waiting = !!st.waiting;
   setRunning(st.running);
   ui.mode = st.mode || null;
   if (st.mode && [...$('mode').options].some((o) => o.value === st.mode)) $('mode').value = st.mode;
@@ -1205,17 +1207,21 @@ function announcePending(message) {
 
 function setRunning(running) {
   ui.running = running;
+  if (!running) ui.waiting = false;
+  // While a turn runs, sending queues the message for after it; once its
+  // reply is done and only background tasks run, a message goes in now.
+  const queues = running && !ui.waiting;
   $('stop').classList.toggle('hidden', !running);
-  // While a turn runs, sending queues the message for after it.
-  $('send').firstChild.textContent = running ? 'Queue ' : 'Send ';
-  $('send').title = running ? 'Runs after the current turn finishes' : '';
-  $('input').placeholder = ui.ask && !running ? `Describe a task for ${agentLabel(ui.agent)}; the project is picked for you…` : `${running ? 'Queue a message for' : 'Message'} ${agentLabel(ui.agent)}…`;
+  $('stop').title = ui.waiting ? 'Stop the background tasks and end the turn' : '';
+  $('send').firstChild.textContent = queues ? 'Queue ' : 'Send ';
+  $('send').title = queues ? 'Runs after the current turn finishes' : '';
+  $('input').placeholder = ui.ask && !running ? `Describe a task for ${agentLabel(ui.agent)}; the project is picked for you…` : `${queues ? 'Queue a message for' : 'Message'} ${agentLabel(ui.agent)}…`;
   $('status').classList.remove('status-error');
   $('status').removeAttribute('role');
   $('status').innerHTML = '';
   if (running && !ui.pending.length) {
     const d = el('span', 'dot');
-    $('status').append(d, document.createTextNode('Working…'));
+    $('status').append(d, document.createTextNode(ui.waiting ? 'Waiting on background work…' : 'Working…'));
   }
   updateForkable();
 }
@@ -1560,8 +1566,8 @@ function renderQueue() {
 // ---------- background tasks ----------
 
 // Shells, monitors and subagents the agent left running while it carries on.
-// They live in the agent's process, which exits when the turn ends, so they
-// only outlast the reply by a few seconds.
+// They live in the agent's process, which stays open after the reply until
+// they finish (two hours at most); the agent is told when each one does.
 const TASK_TYPES = { local_bash: 'Shell', monitor: 'Monitor', local_agent: 'Agent', remote_agent: 'Agent', local_workflow: 'Workflow' };
 
 function renderTasks() {
@@ -1569,7 +1575,7 @@ function renderTasks() {
   box.innerHTML = '';
   if (!ui.tasks.length) return;
   const head = el('div', 'queue-head', `IN THE BACKGROUND · ${ui.tasks.length}`);
-  head.title = 'Stopped when this turn ends';
+  head.title = 'The turn waits for these, up to two hours; Stop ends them';
   box.appendChild(head);
   for (const t of ui.tasks) {
     const row = el('div', 'queued task');
