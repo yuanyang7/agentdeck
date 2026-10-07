@@ -14,6 +14,7 @@ const ui = {
   ask: false, // "Just ask": a new chat whose project is picked from the message (see /api/route)
   pending: [],
   queue: [], // messages waiting for the running turn: [{ id, text, images (count) }]
+  tasks: [], // the running turn's background tasks: [{ id, type, description }]
   sessions: [],
   projects: [],
   expandedWorkspace: null,
@@ -573,10 +574,12 @@ function resetView() {
   ui.mode = null;
   ui.pending = [];
   ui.queue = [];
+  ui.tasks = [];
   clearTimeout(pendingAnnouncementTimer);
   $('announcement').textContent = '';
   renderPending();
   renderQueue();
+  renderTasks();
 }
 
 // With `ask`, the chat has no workspace yet: the first message is routed to
@@ -1184,6 +1187,8 @@ function applyStatus(st) {
   ui.pending = next;
   ui.queue = st.queue || [];
   renderQueue();
+  ui.tasks = st.tasks || [];
+  renderTasks();
   setRunning(st.running);
   ui.mode = st.mode || null;
   if (st.mode && [...$('mode').options].some((o) => o.value === st.mode)) $('mode').value = st.mode;
@@ -1548,6 +1553,39 @@ function renderQueue() {
     remove.setAttribute('aria-label', 'Remove from the queue');
     remove.onclick = () => unqueue(m, false);
     row.append(now, edit, remove);
+    box.appendChild(row);
+  }
+}
+
+// ---------- background tasks ----------
+
+// Shells, monitors and subagents the agent left running while it carries on.
+// They live in the agent's process, which exits when the turn ends, so they
+// only outlast the reply by a few seconds.
+const TASK_TYPES = { local_bash: 'Shell', monitor: 'Monitor', local_agent: 'Agent', remote_agent: 'Agent', local_workflow: 'Workflow' };
+
+function renderTasks() {
+  const box = $('tasks');
+  box.innerHTML = '';
+  if (!ui.tasks.length) return;
+  const head = el('div', 'queue-head', `IN THE BACKGROUND · ${ui.tasks.length}`);
+  head.title = 'Stopped when this turn ends';
+  box.appendChild(head);
+  for (const t of ui.tasks) {
+    const row = el('div', 'queued task');
+    row.appendChild(el('span', 'task-type', TASK_TYPES[t.type] || t.type || 'Task'));
+    row.appendChild(el('div', 'queued-text', t.description || t.id));
+    const stop = el('button', '', 'Stop');
+    stop.type = 'button';
+    stop.title = 'Stop this task; the turn goes on';
+    stop.onclick = () => {
+      stop.disabled = true;
+      api('/api/stop-task', { key: ui.key, id: t.id }).catch((err) => {
+        stop.disabled = false;
+        alert(err.message);
+      });
+    };
+    row.appendChild(stop);
     box.appendChild(row);
   }
 }
