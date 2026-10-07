@@ -131,9 +131,14 @@ turn and clears the queue, putting the queued messages back into the message
 box of the device that pressed it. While a Claude Code turn runs, shells,
 monitors and subagents it left running in the background are listed above the
 composer under **In the background**, each with a **Stop** button. They live
-in the agent's process, which exits when the turn ends, so anything still
-running then (a dev server, a `tail -f`) is stopped, and the chat says so
-with a "Stopped when the turn ended" line. Permission
+in the agent's process, which stays open after the reply until they finish:
+the chat shows "Waiting on background work…", the agent is told when each
+one ends and replies again by itself (so a long build or render started in
+the background gets checked and carried on), and a message sent meanwhile
+goes straight in rather than waiting in the queue. **Stop** then ends the
+turn and the tasks with it. After two hours of waiting, or if the agent
+doesn't reply once the tasks are done, the turn ends; anything still running
+is stopped, and the chat says so with a "Stopped when the turn ended" line. Permission
 prompts (file edits, shell commands, plan approval, questions) appear on
 every connected device, and whichever answers first wins. Avoid keeping the
 same conversation open here and in a terminal, desktop app, or opencode TUI
