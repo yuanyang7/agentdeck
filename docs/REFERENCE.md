@@ -126,6 +126,38 @@ For Codex and opencode the server starts a private `codex app-server` /
 `opencode serve` the first time it is needed and stops it when the server
 exits.
 
+## Usage limits
+
+A Claude Code turn that ends on a plan limit pauses the chat instead of
+ending it. The limit is recognized by the reply's `rate_limit` error, or a
+result that failed with HTTP 429 or says "You've hit your … limit".
+
+- The chat continues one minute after the reset, and never sooner than five
+  minutes after hitting the limit. The reset time comes from the CLI's
+  `rate_limit_event`. That event doesn't always come, so the next source is
+  the `quotaLimits` the CLI writes with the limit reply in the transcript,
+  and after that the latest reset among the used-up limits in **Usage**.
+  With none of these, the chat looks again in half an hour. Extra usage and
+  "monthly spend limit" (spend limits) are never waited for.
+- Just before continuing, the plan's usage is read again. If a limit is
+  still used up (a weekly limit hit meanwhile, say), the wait moves to that
+  one's reset, however far off.
+- It continues with the first queued message, or else with "Your usage
+  limit has reset. Continue where you left off." The rest of the queue
+  follows as usual. A paused chat isn't running, so it doesn't block a
+  restart.
+- **Continue now** tries at once, without checking usage. **Don't continue**
+  ends the wait and puts the queued messages back into that device's message
+  box. **Send now** on a queued message also continues at once, with it.
+- Waiting chats, their queued messages and the on/off switch are kept in
+  `~/.agentdeck/resume.json`. The clock is checked every 30 s rather than
+  set as one long timer, since timers stall while the Mac sleeps. Turning
+  the switch off leaves chats that are already waiting alone.
+- Each pause, each move of the time and each continue is logged (the
+  server's output, e.g. `/tmp/agentdeck.log` under the LaunchAgent).
+
+Codex and opencode turns that hit a limit end as before.
+
 ## Skills
 
 The `/` menu lists what the chat's agent offers in the project folder. Each
@@ -600,6 +632,8 @@ its own, and the prompt leaves the address once the page has read it.
   for the project bar.
 - `lib/feedbackloop.mjs`: whether the open workspace is in feedback-loop,
   its bug queue, and filing reports through the CLI.
+- `lib/resume.mjs`: chats waiting for a plan limit to reset, kept across
+  restarts; the waiting itself is in `lib/hub.mjs`.
 - `lib/stats.mjs`: the Stats page's data, scanned from the agents' own files
   into hour buckets and cached per file; `public/stats.js` renders it.
 - `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,
