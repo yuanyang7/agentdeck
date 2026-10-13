@@ -145,6 +145,20 @@ same conversation open here and in a terminal, desktop app, or opencode TUI
 at the same time — each keeps its own copy in memory and won't see the
 other's messages.
 
+### Usage limits
+
+When a Claude Code turn runs into a plan limit ("You've hit your session
+limit · resets 3:30am"), the chat pauses and carries on by itself once the
+limit resets, as the Claude app does. A bar above the composer says which
+limit it hit and when the chat continues, with **Continue now** and
+**Don't continue**; the sidebar marks the chat "Continues at 3:30 AM".
+Messages sent meanwhile are queued and the first one goes in when the chat
+continues; with none queued, the agent is told to continue where it left
+off. The wait is kept on the host, so it survives a restart of agentdeck and
+the machine sleeping through the reset. Turn it off with the switch in the
+**Usage** panel. See
+[docs/REFERENCE.md](docs/REFERENCE.md#usage-limits) for the details.
+
 ### Forks
 
 Hover any message you sent and click the fork button beside it to branch the

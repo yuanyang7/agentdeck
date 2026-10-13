@@ -29,6 +29,7 @@ import * as toolhub from './lib/toolhub.mjs';
 import { routeTask, MODEL as ROUTE_MODEL } from './lib/router.mjs';
 import * as feedbackloop from './lib/feedbackloop.mjs';
 import { collect as collectStats } from './lib/stats.mjs';
+import { autoResume, setAutoResume } from './lib/resume.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STARTED = Date.now(); // pages compare this to tell a restarted server from the old one
@@ -204,7 +205,9 @@ const streams = new Map();
 // Every conversation starts with a map of the projects (lib/workspace-index.mjs),
 // a message naming one of them offers it as an extra folder (lib/folders.mjs),
 // and a project made during a turn is offered as a place to move the chat.
+// A chat paused at a plan limit continues with its own agent once it resets.
 const hub = new Hub({
+  backend: (id) => backends.get(id),
   instructions: () => workspaceIndex(listProjects, PROJECT_ROOTS),
   mentions: (text, dir, dirs) => mentionedFolders(text, rootFolders(PROJECT_ROOTS), dir, dirs),
   created: (dir, since) => newProjects(dir, since),
@@ -360,11 +363,13 @@ function sameFolder(a, b) {
 
 // A chat is running when agentdeck runs a turn in it, or when a backend sees
 // it mid-turn in another app (`elsewhere`: no Stop, no live items here).
-// `stopped`: its last turn was cut off before it finished.
+// `stopped`: its last turn was cut off before it finished. `resumeAt`: it
+// hit a plan limit and continues by itself then (lib/hub.mjs).
 function runState(s, live) {
   const running = !!live?.running;
   const elsewhere = !running && s.turn === 'working';
-  return { turn: undefined, running: running || elsewhere, elsewhere, stopped: !running && s.turn === 'stopped' };
+  const resumeAt = (!running && live?.resume?.at) || null;
+  return { turn: undefined, running: running || elsewhere, elsewhere, stopped: !running && !resumeAt && s.turn === 'stopped', resumeAt };
 }
 
 // Chats working in other apps change without agentdeck hearing of it, so the
@@ -410,7 +415,7 @@ async function listProjects() {
       p.sessions += 1;
       p.lastModified = Math.max(p.lastModified, s.updatedAt || 0);
       p.recent.push(chat);
-      if (chat.pendingCount || chat.unread || chat.running) p.attention.push(chat);
+      if (chat.pendingCount || chat.unread || chat.running || chat.resumeAt) p.attention.push(chat);
       if (chat.tags.length) p.tagged.push(chat); // for the sidebar's all-workspace tag view
       byDir.set(s.dir, p);
     }
@@ -1032,6 +1037,33 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
 
+    if (p === '/api/resume' && req.method === 'POST') {
+      // A chat paused at a plan limit: `cancel` stops it from continuing by
+      // itself (its queued messages come back for the composer), otherwise
+      // it continues now instead of at the reset.
+      const { key, cancel } = await readJson(req);
+      const conv = hub.get(key);
+      if (!conv?.resume) return send(res, 404, { error: 'This chat is no longer waiting for a limit to reset.' });
+      if (cancel) {
+        const dropped = hub.cancelResume(key) || [];
+        return send(res, 200, { ok: true, dropped: dropped.map(({ text, images }) => ({ text, images })) });
+      }
+      if (!(await hub.resume(conv, { check: false }))) return send(res, 409, { error: 'This chat is already working.' });
+      return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/auto-resume') {
+      // Whether chats that hit a plan limit continue by themselves once it
+      // resets (lib/resume.mjs). On by default.
+      if (req.method === 'POST') {
+        const { enabled } = await readJson(req);
+        if (typeof enabled !== 'boolean') return send(res, 400, { error: 'Bad setting' });
+        setAutoResume(enabled);
+        hub.broadcast({ type: 'auto_resume', enabled });
+      }
+      return send(res, 200, { enabled: autoResume() });
+    }
+
     if (p === '/api/send-now' && req.method === 'POST') {
       // Stops the running turn and starts this queued message next.
       const { key, id } = await readJson(req);
@@ -1135,6 +1167,7 @@ const server = http.createServer(async (req, res) => {
       } else if (conv) {
         conv.dir = target;
         conv.created = [];
+        if (conv.resume) hub.savePaused();
       }
       // The new folder is the chat's own now, not an extra one.
       if (settings) setSettings(agent, id, { ...settings, dirs: settings.dirs.filter((d) => d !== target) });

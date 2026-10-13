@@ -16,6 +16,7 @@ const ui = {
   pending: [],
   queue: [], // messages waiting for the running turn: [{ id, text, images (count) }]
   tasks: [], // the running turn's background tasks: [{ id, type, description }]
+  resume: null, // the chat hit a plan limit and continues by itself: { at, label }
   sessions: [],
   projects: [],
   expandedWorkspace: null,
@@ -382,8 +383,10 @@ function renderSessions() {
     const pending = p.attention.filter((s) => s.pendingCount).length;
     const running = p.attention.filter((s) => s.running && !s.pendingCount).length;
     const unread = p.attention.filter((s) => s.unread && !s.pendingCount && !s.running).length;
+    const paused = p.attention.filter((s) => s.resumeAt && !s.pendingCount && !s.running).length;
     if (pending) counts.push(`${pending} decision${pending === 1 ? '' : 's'}`);
     if (running) counts.push(`${running} working`);
+    if (paused) counts.push(`${paused} at a limit`);
     if (unread) counts.push(`${unread} unread`);
     const detail = el('span', 'workspace-detail', counts.join(' · ') || `${p.sessions} conversation${p.sessions === 1 ? '' : 's'}`);
     head.append(name, detail);
@@ -447,6 +450,10 @@ function sessionRow(s, showWorkspace = false) {
       const d = el('span', 'dot' + (s.elsewhere ? ' elsewhere' : ''));
       d.title = s.elsewhere ? 'Working in another app' : 'Working';
       t.appendChild(d);
+    } else if (s.resumeAt) {
+      const d = el('span', 'dot paused');
+      d.title = `Hit a usage limit; continues ${resumeTime(s.resumeAt)}`;
+      t.appendChild(d);
     } else if (s.unread && (s.key !== ui.key || s.dir !== ui.dir)) {
       // A turn finished here that this browser hasn't seen; opening the chat
       // counts as reading it. The open chat itself is never "unread".
@@ -460,7 +467,7 @@ function sessionRow(s, showWorkspace = false) {
     const meta = el('div', 's-meta');
     if (ui.agents.length > 1) meta.appendChild(el('span', 'agent-badge', agentLabel(s.agent)));
     meta.appendChild(document.createTextNode([showWorkspace && ui.projects.find((p) => p.dir === s.dir)?.name,
-      s.pendingCount ? 'Needs decision' : s.elsewhere ? 'Working in another app' : s.running ? 'Working' : s.unread ? 'Finished · unread' : s.stopped ? 'Stopped mid-turn' : null,
+      s.pendingCount ? 'Needs decision' : s.elsewhere ? 'Working in another app' : s.running ? 'Working' : s.resumeAt ? `Continues ${resumeTime(s.resumeAt)}` : s.unread ? 'Finished · unread' : s.stopped ? 'Stopped mid-turn' : null,
       timeAgo(s.updatedAt), s.branch].filter(Boolean).join(' · ')));
     li.append(t, meta);
     if (s.tags?.length) {
@@ -576,11 +583,13 @@ function resetView() {
   ui.pending = [];
   ui.queue = [];
   ui.tasks = [];
+  ui.resume = null;
   clearTimeout(pendingAnnouncementTimer);
   $('announcement').textContent = '';
   renderPending();
   renderQueue();
   renderTasks();
+  renderResume();
 }
 
 // With `ask`, the chat has no workspace yet: the first message is routed to
@@ -1190,8 +1199,10 @@ function applyStatus(st) {
   renderQueue();
   ui.tasks = st.tasks || [];
   renderTasks();
+  ui.resume = st.resume || null;
   ui.waiting = !!st.waiting;
   setRunning(st.running);
+  renderResume();
   ui.mode = st.mode || null;
   if (st.mode && [...$('mode').options].some((o) => o.value === st.mode)) $('mode').value = st.mode;
   renderPending();
@@ -1209,12 +1220,14 @@ function setRunning(running) {
   ui.running = running;
   if (!running) ui.waiting = false;
   // While a turn runs, sending queues the message for after it; once its
-  // reply is done and only background tasks run, a message goes in now.
-  const queues = running && !ui.waiting;
+  // reply is done and only background tasks run, a message goes in now. A
+  // chat paused at a plan limit queues it for when the limit resets.
+  const paused = !running && !!ui.resume;
+  const queues = (running && !ui.waiting) || paused;
   $('stop').classList.toggle('hidden', !running);
   $('stop').title = ui.waiting ? 'Stop the background tasks and end the turn' : '';
   $('send').firstChild.textContent = queues ? 'Queue ' : 'Send ';
-  $('send').title = queues ? 'Runs after the current turn finishes' : '';
+  $('send').title = paused ? 'Runs when the limit resets' : queues ? 'Runs after the current turn finishes' : '';
   $('input').placeholder = ui.ask && !running ? `Describe a task for ${agentLabel(ui.agent)}; the project is picked for you…` : `${queues ? 'Queue a message for' : 'Message'} ${agentLabel(ui.agent)}…`;
   $('status').classList.remove('status-error');
   $('status').removeAttribute('role');
@@ -1290,6 +1303,10 @@ function connectEvents() {
     }
     if (ev.type === 'restarting') {
       awaitRestart();
+      return;
+    }
+    if (ev.type === 'auto_resume') {
+      if ($('auto-resume')) $('auto-resume').checked = ev.enabled;
       return;
     }
     if (ev.type === 'status') {
@@ -1561,6 +1578,73 @@ function renderQueue() {
     row.append(now, edit, remove);
     box.appendChild(row);
   }
+}
+
+// ---------- paused at a usage limit ----------
+
+// A chat whose turn hit a plan limit waits on the server and continues by
+// itself once the limit resets (lib/hub.mjs), with the first queued message
+// or else a "continue" prompt. Every device sees the same wait.
+
+// "at 3:30 AM", "tomorrow at 3:30 AM", "Thu at 3:30 AM".
+function resumeTime(at) {
+  const when = new Date(at);
+  const time = when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const day = (d) => new Date(d).setHours(0, 0, 0, 0);
+  const days = Math.round((day(at) - day(Date.now())) / 86_400_000);
+  if (days <= 0) return `at ${time}`;
+  if (days === 1) return `tomorrow at ${time}`;
+  return `${when.toLocaleDateString([], days < 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' })} at ${time}`;
+}
+
+// "in 2 h 10 min", "in 4 min", "in a moment".
+function timeUntil(at) {
+  const min = Math.round((at - Date.now()) / 60_000);
+  if (min < 1) return 'in a moment';
+  if (min < 60) return `in ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 48) return `in ${h} h${min % 60 ? ` ${min % 60} min` : ''}`;
+  return `in ${Math.round(h / 24)} days`;
+}
+
+let resumeTimer = 0;
+
+function renderResume() {
+  const box = $('resume');
+  clearInterval(resumeTimer);
+  box.innerHTML = '';
+  if (!ui.resume || ui.running) return;
+  const { at, label } = ui.resume;
+  const row = el('div', 'queued resume-row');
+  row.appendChild(el('span', 'task-type', 'Paused'));
+  const text = el('div', 'queued-text');
+  const say = () => {
+    text.textContent = `${label || 'Usage limit'} reached. Continues by itself ${resumeTime(at)} (${timeUntil(at)}).`;
+  };
+  say();
+  row.appendChild(text);
+  resumeTimer = setInterval(say, 30_000);
+  const now = el('button', '', 'Continue now');
+  now.type = 'button';
+  now.title = 'Try now instead of waiting for the reset';
+  const cancel = el('button', '', 'Don’t continue');
+  cancel.type = 'button';
+  cancel.title = 'Stay paused; queued messages go back to the message box';
+  const act = async (b, body) => {
+    now.disabled = cancel.disabled = true;
+    b.textContent += '…';
+    try {
+      const r = await api('/api/resume', { key: ui.key, ...body });
+      if (r.dropped?.length) restoreToComposer(r.dropped);
+    } catch (err) {
+      alert(err.message);
+      renderResume();
+    }
+  };
+  now.onclick = () => act(now, {});
+  cancel.onclick = () => act(cancel, { cancel: true });
+  row.append(now, cancel);
+  box.appendChild(row);
 }
 
 // ---------- background tasks ----------
@@ -2191,7 +2275,8 @@ $('composer').addEventListener('submit', async (e) => {
       dirs,
     });
     if (isNew) loadSessions();
-    setRunning(true);
+    // A chat paused at a limit only queued it.
+    if (!ui.resume || ui.running) setRunning(true);
     input.value = '';
     hideCommandMenu();
     attachments.length = 0;
@@ -2248,9 +2333,34 @@ async function loadUsage() {
     box.appendChild(el('div', 'u-head', `${agentLabel(ui.agent)} · ${u.plan ? 'Plan: ' + u.plan : 'API key / no plan limits'}`));
     for (const l of u.limits) box.appendChild(usageRow(l.label, l.percent, l.resetsAt));
     if (!u.limits.length) box.appendChild(el('div', 'muted', 'Plan rate limits are not available for this login.'));
+    if ((await loadOptions(ui.agent).catch(() => null))?.resumes) box.appendChild(await autoResumeToggle());
   } catch (err) {
     box.textContent = 'Could not load usage: ' + err.message;
   }
+}
+
+// The switch for continuing chats by themselves when a plan limit resets.
+// It is the server's, so it holds for every device.
+async function autoResumeToggle() {
+  const { enabled } = await api('/api/auto-resume').catch(() => ({ enabled: true }));
+  const label = el('label', 'u-toggle');
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.id = 'auto-resume';
+  box.checked = enabled;
+  box.onchange = async () => {
+    box.disabled = true;
+    try {
+      box.checked = (await api('/api/auto-resume', { enabled: box.checked })).enabled;
+    } catch (err) {
+      box.checked = !box.checked;
+      alert('Could not change it: ' + err.message);
+    }
+    box.disabled = false;
+  };
+  label.append(box, document.createTextNode(` Continue chats by themselves when a limit resets`));
+  label.title = 'A chat that hits a usage limit waits for the reset, then carries on where it stopped';
+  return label;
 }
 
 $('toggle-usage').addEventListener('click', () => {
