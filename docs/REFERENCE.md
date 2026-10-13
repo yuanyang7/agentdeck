@@ -128,14 +128,17 @@ exits.
 
 ## Usage limits
 
-A Claude Code turn that ends on a plan limit (the reply carries the
-`rate_limit` error, and the CLI's `rate_limit_event` says which limit and
-when it resets) pauses the chat instead of ending it:
+A Claude Code turn that ends on a plan limit pauses the chat instead of
+ending it. The limit is recognized by the reply's `rate_limit` error, or a
+result that failed with HTTP 429 or says "You've hit your … limit".
 
 - The chat continues one minute after the reset, and never sooner than five
-  minutes after hitting the limit. If the CLI didn't give a reset time, the
-  latest reset among the used-up limits in **Usage** is used; with none,
-  nothing is scheduled. Extra usage (a spend limit) is never waited for.
+  minutes after hitting the limit. The reset time comes from the CLI's
+  `rate_limit_event`. That event doesn't always come, so the next source is
+  the `quotaLimits` the CLI writes with the limit reply in the transcript,
+  and after that the latest reset among the used-up limits in **Usage**.
+  With none of these, the chat looks again in half an hour. Extra usage and
+  "monthly spend limit" (spend limits) are never waited for.
 - Just before continuing, the plan's usage is read again. If a limit is
   still used up (a weekly limit hit meanwhile, say), the wait moves to that
   one's reset, however far off.
@@ -150,6 +153,8 @@ when it resets) pauses the chat instead of ending it:
   `~/.agentdeck/resume.json`. The clock is checked every 30 s rather than
   set as one long timer, since timers stall while the Mac sleeps. Turning
   the switch off leaves chats that are already waiting alone.
+- Each pause, each move of the time and each continue is logged (the
+  server's output, e.g. `/tmp/agentdeck.log` under the LaunchAgent).
 
 Codex and opencode turns that hit a limit end as before.
 
