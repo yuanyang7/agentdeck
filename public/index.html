@@ -179,10 +179,15 @@
     </form>
   </dialog>
 
-  <dialog id="agents-dialog" class="tag-dialog">
+  <dialog id="agents-dialog" class="tag-dialog agents-dialog">
     <form method="dialog" id="agents-form">
       <h2>Ask several agents</h2>
       <p class="muted folder-hint">Each one answers in its own conversation, shown side by side. Follow-ups go to all of them unless you reply to one. In a project they only read; in Chat they chat.</p>
+      <fieldset class="tier-row">
+        <legend class="tier-legend">Models</legend>
+        <div id="agents-tier" class="tier-switch"></div>
+        <p id="agents-tier-hint" class="muted tier-hint" aria-live="polite"></p>
+      </fieldset>
       <div id="agents-list" class="folder-list" role="group" aria-label="Agents"></div>
       <div class="tag-actions">
         <button type="button" id="agents-cancel">Cancel</button>

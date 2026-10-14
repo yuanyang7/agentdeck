@@ -434,8 +434,30 @@ every session in `/api/projects` and `/api/sessions` carries its `group`.
 With `group` set, the server picks the mode: Chat mode in the Chat folder,
 otherwise the agent's `readOnlyMode` (Claude Code `plan`, Codex
 `read-only`, opencode `plan`, Gemini `default`), whatever the request
-says. Each member uses the model and effort last picked for its agent in
-that browser. Follow-ups are the same request with the member's
+says. Each member uses the model and effort the Compare dialog shows for
+its agent, which the page sends with every message to it; a reopened group
+reads them from the members' stored chat settings. The column head names
+them.
+
+The dialog's tier comes from `lib/compare.mjs`, kept in
+`~/.agentdeck/compare.json` (`{ tier, overrides: { [tier]: { [agent]: { model, effort } } } }`)
+so every device compares the same way. Each tier matches a model in the
+agent's own list, newest first, and asks for an effort the model offers:
+
+| Tier | Claude Code | Codex | Gemini | Effort |
+|---|---|---|---|---|
+| Fast | `haiku` | first `luna` | Flash, low | low |
+| Balanced | `sonnet` | first `sol` | Flash, medium | medium |
+| Best | `opus` | `astra` | Pro if listed, else Flash, high | high |
+
+Antigravity CLI puts Gemini's effort in the model name, so Gemini gets no
+separate effort. opencode fronts many providers and has no tier models: it
+keeps its default model and takes the tier's effort. A model or effort
+changed in the dialog is kept for that agent in that tier (picking the
+tier's own again drops it), and **Use tier's** goes back. `GET
+/api/compare` returns `{ tier, tiers, picks: { [tier]: { [agent]: { model, effort, custom } } } }`;
+`POST /api/compare` takes `{ tier }`, `{ tier, agent, model, effort }` or
+`{ tier, agent, reset: true }`. Follow-ups are the same request with the member's
 `sessionId`, from the composer at the bottom (every member) or a column's
 own box (that member, text only); a member mid-turn queues it as usual. Gemini takes no images,
 so a message with images reaches it as text only. The compare view is

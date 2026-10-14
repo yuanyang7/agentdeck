@@ -466,12 +466,37 @@ body.stats-open { overflow: hidden; }
 .composer-options.several select:not(#agent), .composer-options.several .folders-button { display: none; }
 .agent-choice { display: flex; align-items: center; gap: 10px; padding: 8px 2px; cursor: pointer; }
 .agent-choice input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+/* Compare: a tier picks a matched model per agent; each row can change it. */
+.agents-dialog { width: min(540px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.tier-row { border: 0; margin: 0 0 12px; padding: 0; min-width: 0; }
+.tier-legend { padding: 0; margin-bottom: 8px; font-size: 12px; font-weight: 650; }
+.tier-switch { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--code-bg); }
+.tier-chip { position: relative; display: inline-flex; align-items: center; min-height: 32px; padding: 0 14px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; transition: background .16s, color .16s; }
+.tier-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.tier-chip:has(input:checked) { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(29, 40, 75, .12), inset 0 0 0 1px var(--border); }
+.tier-chip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine) { .tier-chip:hover:not(:has(input:checked)) { color: var(--text); } }
+.tier-hint { font-size: 12px; margin: 6px 0 0; min-height: 1.4em; }
+.agent-row { display: grid; grid-template-columns: minmax(110px, auto) 1fr; align-items: center; gap: 6px 12px; border-top: 1px solid var(--border); padding: 4px 0; }
+.agent-row:first-child { border-top: 0; }
+.agent-models { display: flex; gap: 6px; justify-content: flex-end; min-width: 0; }
+.tag-dialog .agent-models select { width: auto; min-width: 0; max-width: 100%; margin: 0; padding: 6px 8px; font-size: 13px; }
+.agent-models select:disabled { opacity: .45; cursor: default; }
+.agent-models .model-loading { font-size: 12px; }
+.agent-models .changed { flex: none; border: 0; background: transparent; padding: 4px 2px; font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) { .agent-models .changed:hover { text-decoration: underline; } }
+@media (max-width: 520px) {
+  .agent-row { grid-template-columns: 1fr; }
+  .agent-models { justify-content: flex-start; padding: 0 0 6px 26px; }
+  .tag-dialog .agent-models select { font-size: 16px; flex: 1 1 0; }
+}
 .messages.compare { padding: 0; gap: 0; overflow: hidden; }
 .cols { flex: 1; min-height: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
 .col { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); }
 .col:last-child { border-right: 0; }
 .col-head { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--card) 60%, var(--bg)); font-size: 12px; }
 .col-name { font-weight: 720; font-size: 13px; white-space: nowrap; }
+.col-model { flex: none; max-width: 45%; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .col-state { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .col-open { flex: none; font-size: 11px; font-weight: 650; color: var(--accent); text-decoration: none; }
 .col-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 20px 18px 28px; scrollbar-width: thin; }
