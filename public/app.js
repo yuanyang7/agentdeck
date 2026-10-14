@@ -1116,6 +1116,12 @@ function renderItem(item, streaming) {
     case 'text': {
       const d = el('div', 'msg-assistant');
       d.innerHTML = md(item.text);
+      // A `remember` block is a note kept for later chats (lib/memory.mjs).
+      for (const code of d.querySelectorAll('pre > code.language-remember')) {
+        const chip = el('div', 'remembered');
+        chip.append(el('span', 'remembered-kicker', 'REMEMBERED'), el('span', 'remembered-notes', code.textContent.trim()));
+        code.parentElement.replaceWith(chip);
+      }
       for (const img of d.querySelectorAll('img')) {
         // ![demo](clip.mp4) and ![voice](take.mp3) play inline.
         const kind = mediaKind(img.getAttribute('src') || '');
@@ -1355,6 +1361,12 @@ function connectEvents() {
     }
     if (ev.type === 'devices_changed') {
       loadDevices().catch(() => {});
+      return;
+    }
+    if (ev.type === 'memory_changed') {
+      // Edited on another device while the editor is open here: show it,
+      // unless this one has unsaved changes.
+      if ($('memory-dialog').open && !memoryDirty) openMemory();
       return;
     }
     if (ev.type === 'actions_changed') {
@@ -1914,8 +1926,62 @@ function renderFolders() {
   b.textContent = dirs.length ? `📁 ${folderName(dirs[0])}${dirs.length > 1 ? ` +${dirs.length - 1}` : ''}` : '📁 Folders';
   b.classList.toggle('on', dirs.length > 0);
   b.title = dirs.length ? `Also works in:\n${dirs.join('\n')}` : 'Let this chat work in other folders too';
+  $('memory').classList.toggle('hidden', !inChat());
   if ($('folder-dialog').open) renderFolderEditor();
 }
+
+// ---------- memory ----------
+
+// What chats remember across conversations (lib/memory.mjs): a file every
+// new chat starts knowing, edited here.
+let memoryDirty = false;
+async function openMemory() {
+  memoryDirty = false;
+  $('memory-error').textContent = '';
+  $('memory-text').value = '';
+  $('memory-dialog').showModal();
+  try {
+    const r = await api('/api/memory');
+    $('memory-text').value = r.text;
+    $('memory-text').maxLength = r.max;
+    $('memory-file').textContent = r.file.replace(/^\/Users\/[^/]+/, '~');
+    memoryCount();
+  } catch (err) {
+    $('memory-error').textContent = err.message;
+  }
+}
+
+function memoryCount() {
+  const t = $('memory-text').value;
+  const notes = t.split('\n').filter((l) => l.trim()).length;
+  $('memory-count').textContent = notes ? `${notes} ${notes === 1 ? 'note' : 'notes'} · ${t.length.toLocaleString()} characters` : 'Nothing remembered';
+  $('memory-clear').disabled = !t.trim();
+}
+
+$('memory').addEventListener('click', openMemory);
+$('memory-text').addEventListener('input', () => {
+  memoryDirty = true;
+  memoryCount();
+});
+$('memory-clear').addEventListener('click', () => {
+  if (!confirm('Forget everything? Every new chat will start knowing nothing. You can still Cancel after this.')) return;
+  $('memory-text').value = '';
+  memoryCount();
+  $('memory-text').focus();
+});
+$('memory-cancel').addEventListener('click', () => $('memory-dialog').close());
+$('memory-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('memory-save').disabled = true;
+  try {
+    await api('/api/memory', { text: $('memory-text').value });
+    $('memory-dialog').close();
+  } catch (err) {
+    $('memory-error').textContent = err.message;
+  } finally {
+    $('memory-save').disabled = false;
+  }
+});
 
 function renderFolderEditor() {
   const dirs = chatDirs();

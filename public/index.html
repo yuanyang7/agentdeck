@@ -111,6 +111,7 @@
             <select id="model" title="Model" aria-label="Model"></select>
             <select id="effort" title="Effort" aria-label="Effort"></select>
             <button type="button" id="folders" class="folders-button" aria-haspopup="dialog">📁 Folders</button>
+            <button type="button" id="memory" class="folders-button hidden" aria-haspopup="dialog" title="What chats remember across conversations">Memory</button>
           </div>
           <div class="composer-actions">
             <button type="button" id="attach" title="Attach images or files (or paste / drop them)" aria-label="Attach images or files">＋</button>
@@ -147,6 +148,20 @@
       <div id="tag-quick" class="tag-list"></div>
       <div class="tag-actions">
         <button type="submit" class="primary">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="memory-dialog" class="tag-dialog memory-dialog">
+    <form method="dialog" id="memory-form">
+      <h2>Memory</h2>
+      <p class="muted folder-hint">Notes every new chat starts knowing, shared by all agents. An agent adds one when you ask it to remember something; edit or clear them here. Kept in <code id="memory-file"></code>.</p>
+      <textarea id="memory-text" rows="12" spellcheck="false" placeholder="Nothing remembered yet. Tell a chat “remember that…”, or write notes here, one per line."></textarea>
+      <div class="memory-foot"><span id="memory-count" class="muted"></span><button type="button" id="memory-clear" class="danger">Clear all</button></div>
+      <p id="memory-error" class="error"></p>
+      <div class="tag-actions">
+        <button type="button" id="memory-cancel">Cancel</button>
+        <button type="submit" class="primary" id="memory-save">Save</button>
       </div>
     </form>
   </dialog>

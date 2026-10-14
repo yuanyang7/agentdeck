@@ -368,6 +368,25 @@ does it its own way:
 - **Gemini**: *Read only*, with the chat instructions in front of the first
   message like the workspace index.
 
+### Memory
+
+What chats remember across conversations is one file, `MEMORY.md` in
+`CHAT_DIR` (`lib/memory.mjs`), at most 16,000 characters. The chat prompt
+of every agent includes it, under "What you know from earlier chats", and
+asks the agent to end a reply with a fenced code block whose language is
+`remember`, one note per line, whenever the user asks it to remember
+something or says something worth keeping. When a Chat-mode turn ends,
+the hub takes the notes out of the reply's text, appends the ones not
+already in the file as `- note` lines and shows "Remembered: …" in the
+chat; the page renders the block itself as a **Remembered** chip. The same
+convention works for every agent, since it is only text. `GET /api/memory`
+returns the file, `POST /api/memory` replaces it (the **Memory** button in
+Chat), and every device hears `memory_changed`. Agents are told not to
+edit the file themselves; Chat mode gives them no way to anyway. Codex,
+opencode and Gemini record their instructions when a conversation starts,
+so a chat they began earlier doesn't see notes added since; Claude Code
+gets the prompt on every turn.
+
 The mode is stored with the chat like any other, so every device continues
 it the same way. In the Chat workspace, the mode picked for a new
 conversation isn't remembered across chats the way model and effort are:
@@ -712,6 +731,8 @@ its own, and the prompt leaves the address once the page has read it.
   instructions; each agent in `lib/agents/` maps the mode onto its own.
 - `lib/groups.mjs`: which conversations were started together as a group of
   agents asked the same thing.
+- `lib/memory.mjs`: what chats remember across conversations, and reading
+  the notes out of a reply.
 - `lib/folders.mjs`: a chat's extra folders: checking them and spotting
   projects a message names.
 - `lib/commands.mjs`: reading a `/name` message and caching each folder's
