@@ -15,6 +15,7 @@ const ui = {
   ask: false, // "Just ask": a new chat whose project is picked from the message (see /api/route)
   group: null, // several agents asked the same thing: { id, dir, agents, members, active } (see openGroup)
   draftAgents: [], // the agents a new conversation will ask, when more than one
+  draftPicks: {}, // and the { model, effort } each will use, from the Compare dialog
   private: false, // the next new chat is private (lib/private.mjs): no memory, not listed, deleted on leaving
   isPrivate: false, // the open conversation is private
   pending: [],
@@ -3215,22 +3216,167 @@ function updateAgentsSubmit() {
   $('agents-submit').disabled = !n;
 }
 
+// Compare's tier and each agent's { model, effort, custom } in every tier
+// (lib/compare.mjs), as GET /api/compare returns them; null until loaded.
+let compareState = null;
+
+const effortLabel = (v) => `${v[0].toUpperCase()}${v.slice(1)} effort`;
+
+// The efforts an agent offers with `model` ('' for its default), as fillEfforts does.
+function effortsFor(o, model) {
+  const m = o.models.find((x) => x.value === model) || o.models.find((x) => x.label === o.defaultModel);
+  return m?.efforts ? m.efforts.map((v) => [v, effortLabel(v)]) : o.efforts.map((e) => [e.value, e.label]);
+}
+
+// "Sonnet 5.5 · medium", for a column head or a tier hint.
+function modelLabel(o, model, effort) {
+  const name = o.models.find((m) => m.value === model)?.label || o.defaultModel || 'Default model';
+  return effort ? `${name} · ${effort}` : name;
+}
+
+const TIER_HINTS = {
+  fast: 'Each agent’s quickest model, at low effort.',
+  balanced: 'Each agent’s everyday model, at medium effort.',
+  best: 'Each agent’s strongest model, at high effort.',
+};
+
 function openAgentsDialog() {
   const list = $('agents-list');
   list.innerHTML = '';
   const chosen = new Set(ui.draftAgents.length ? ui.draftAgents : [ui.agent]);
   for (const a of ui.agents) {
-    const row = el('label', 'agent-choice');
+    const row = el('div', 'agent-row');
+    row.dataset.agent = a.id;
+    const choice = el('label', 'agent-choice');
     const cb = el('input');
     cb.type = 'checkbox';
     cb.value = a.id;
     cb.checked = chosen.has(a.id);
-    cb.onchange = updateAgentsSubmit;
-    row.append(cb, el('span', '', a.label));
+    cb.onchange = () => {
+      updateAgentsSubmit();
+      for (const sel of row.querySelectorAll('select')) sel.disabled = !cb.checked;
+    };
+    choice.append(cb, el('span', '', a.label));
+    const models = el('span', 'agent-models');
+    models.appendChild(el('span', 'muted model-loading', 'Loading models…'));
+    row.append(choice, models);
     list.appendChild(row);
   }
   updateAgentsSubmit();
+  renderTierSwitch();
   $('agents-dialog').showModal();
+  loadCompare().catch((err) => {
+    $('agents-tier-hint').textContent = `Couldn’t load models (${err.message}). Each agent will use its default.`;
+    for (const x of list.querySelectorAll('.model-loading')) x.remove();
+  });
+}
+
+async function loadCompare() {
+  compareState = await api('/api/compare');
+  if (!$('agents-dialog').open) return;
+  renderTierSwitch();
+  for (const a of ui.agents) fillAgentModels(a.id);
+}
+
+function renderTierSwitch() {
+  const box = $('agents-tier');
+  box.innerHTML = '';
+  const tier = compareState?.tier || 'balanced';
+  for (const t of compareState?.tiers || [{ value: 'fast', label: 'Fast' }, { value: 'balanced', label: 'Balanced' }, { value: 'best', label: 'Best' }]) {
+    const chip = el('label', 'tier-chip');
+    const r = el('input');
+    r.type = 'radio';
+    r.name = 'compare-tier';
+    r.value = t.value;
+    r.checked = t.value === tier;
+    r.disabled = !compareState;
+    r.onchange = () => pickTier(t.value);
+    chip.append(r, el('span', '', t.label));
+    box.appendChild(chip);
+  }
+  $('agents-tier-hint').textContent = compareState ? TIER_HINTS[tier] || '' : 'Loading models…';
+}
+
+function pickTier(tier) {
+  compareState.tier = tier;
+  $('agents-tier-hint').textContent = TIER_HINTS[tier] || '';
+  for (const a of ui.agents) fillAgentModels(a.id);
+  api('/api/compare', { tier }).catch((err) => alert(err.message));
+}
+
+// A row's model and effort pickers, set to what the tier uses for the agent.
+async function fillAgentModels(agent) {
+  const row = $('agents-list').querySelector(`.agent-row[data-agent="${agent}"]`);
+  if (!row || !compareState) return;
+  let o;
+  try {
+    o = await loadOptions(agent);
+  } catch {
+    row.querySelector('.agent-models').replaceChildren(el('span', 'muted model-loading', 'Default model (list unavailable)'));
+    return;
+  }
+  const tier = compareState.tier;
+  const p = compareState.picks[tier]?.[agent] || { model: null, effort: null, custom: false };
+  const box = row.querySelector('.agent-models');
+  box.innerHTML = '';
+  const name = agentLabel(agent);
+  const off = !row.querySelector('input[type=checkbox]').checked;
+  const model = el('select');
+  model.setAttribute('aria-label', `${name} model`);
+  fillSelect(model, [['', o.defaultModel ? `Default (${o.defaultModel})` : 'Default model'], ...o.models.map((m) => [m.value, m.label])], p.model || '');
+  model.disabled = off;
+  const effort = el('select');
+  effort.setAttribute('aria-label', `${name} effort`);
+  const fillEffort = (value) => {
+    const efforts = effortsFor(o, model.value);
+    fillSelect(effort, [['', o.defaultEffort ? `Default (${o.defaultEffort})` : 'Default effort'], ...efforts], value || '');
+    effort.classList.toggle('hidden', !efforts.length);
+  };
+  fillEffort(p.effort);
+  effort.disabled = off;
+  // Shown while the pick differs from the tier's own.
+  const reset = el('button', 'changed', 'Use tier’s');
+  reset.type = 'button';
+  reset.title = `Go back to the ${tier} tier’s model for ${name}`;
+  reset.classList.toggle('hidden', !p.custom);
+  const store = async (body) => {
+    try {
+      const r = await api('/api/compare', { tier, agent, ...body });
+      compareState.picks[tier][agent] = r.pick;
+      return r.pick;
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+  const save = async () => {
+    const pick = await store({ model: model.value || null, effort: effort.value || null });
+    if (pick) reset.classList.toggle('hidden', !pick.custom);
+  };
+  model.onchange = () => {
+    fillEffort(effort.value);
+    save();
+  };
+  effort.onchange = save;
+  reset.onclick = async () => {
+    const pick = await store({ reset: true });
+    if (!pick) return;
+    model.value = pick.model || '';
+    fillEffort(pick.effort);
+    reset.classList.add('hidden');
+    model.focus();
+  };
+  box.append(model, effort, reset);
+}
+
+// What each picked agent will run, read off the dialog's rows.
+function dialogPicks(agents) {
+  const picks = {};
+  for (const a of agents) {
+    const row = $('agents-list').querySelector(`.agent-row[data-agent="${a}"]`);
+    const [model, effort] = row ? [...row.querySelectorAll('select')] : [];
+    picks[a] = { model: model?.value || null, effort: (effort && !effort.classList.contains('hidden') && effort.value) || null };
+  }
+  return picks;
 }
 
 $('compare').addEventListener('click', openAgentsDialog);
@@ -3244,6 +3390,7 @@ $('agents-form').addEventListener('submit', (e) => {
   if (!chosen.length) return;
   $('agents-dialog').close();
   ui.draftAgents = chosen.length > 1 ? chosen : [];
+  ui.draftPicks = chosen.length > 1 ? dialogPicks(chosen) : {};
   localStorage.setItem('cw_agent', chosen[0]);
   selectAgent(chosen[0]);
   renderAgentPicker();
@@ -3252,8 +3399,10 @@ $('agents-form').addEventListener('submit', (e) => {
   $('input').focus();
 });
 
-function makeMember(agent, key, sessionId) {
-  return { agent, key, sessionId, items: new Map(), els: new Map(), dirty: new Set(), raf: 0,
+// `model` and `effort` are what the member's messages ask for (null: the
+// agent's default), and `modelLabel` names them in its column.
+function makeMember(agent, key, sessionId, { model = null, effort = null } = {}) {
+  return { agent, key, sessionId, model, effort, modelLabel: '', items: new Map(), els: new Map(), dirty: new Set(), raf: 0,
     running: false, waiting: false, pending: [], queue: [], col: null, head: null, body: null, pendingBox: null, tab: null, input: null, send: null };
 }
 
@@ -3280,9 +3429,19 @@ function renderGroupView() {
     m.tab.onclick = () => activateMember(m);
     tabs.appendChild(m.tab);
     renderMemberHead(m);
+    labelMember(m);
     if (!m.key) m.body.appendChild(el('div', 'col-empty', `${agentLabel(m.agent)} never started.`));
   }
   activateMember(groupMembers().find((m) => m.agent === ui.group.active) || groupMembers()[0]);
+}
+
+async function labelMember(m) {
+  try {
+    m.modelLabel = modelLabel(await loadOptions(m.agent), m.model, m.effort);
+  } catch {
+    return;
+  }
+  if (m.head) renderMemberHead(m);
 }
 
 // The column shown on a phone.
@@ -3303,7 +3462,13 @@ function renderMemberHead(m) {
   if (m.pending.length) state.append(dot('decision'), `${m.pending.length === 1 ? 'A decision' : `${m.pending.length} decisions`} needed`);
   else if (m.running) state.append(dot(), m.waiting ? 'Waiting on background work…' : 'Working…');
   else if (m.queue.length) state.append(`${m.queue.length} queued`);
-  h.append(el('span', 'col-name', agentLabel(m.agent)), state);
+  h.append(el('span', 'col-name', agentLabel(m.agent)));
+  if (m.modelLabel) {
+    const model = el('span', 'col-model', m.modelLabel);
+    model.title = `Model and effort ${agentLabel(m.agent)} answers with`;
+    h.appendChild(model);
+  }
+  h.appendChild(state);
   if (m.sessionId) {
     const open = el('a', 'col-open', 'Open');
     open.href = `#dir=${encodeURIComponent(ui.group.dir)}&a=${m.agent}&s=${encodeURIComponent(m.sessionId)}`;
@@ -3454,7 +3619,7 @@ async function openGroup(id) {
   ui.draftAgents = [];
   $('just-ask').classList.remove('on');
   resetView();
-  ui.group = { id, dir: g.dir, agents: g.agents, members: g.members.map((x) => makeMember(x.agent, x.key, x.sessionId)), active: g.agents[0] };
+  ui.group = { id, dir: g.dir, agents: g.agents, members: g.members.map((x) => makeMember(x.agent, x.key, x.sessionId, x)), active: g.agents[0] };
   selectAgent(g.agents[0]);
   renderAgentPicker();
   renderFolders();
@@ -3478,12 +3643,11 @@ async function openGroup(id) {
   if (ui.group?.id === id) setRunning(groupMembers().some((m) => m.running));
 }
 
-// One message to one member, with the model and effort last picked for its
-// agent; the server forces the group's mode.
+// One message to one member, with the model and effort picked for it in the
+// Compare dialog (or the chat's own since); the server forces the group's mode.
 async function sendMember(m, text, images) {
-  const get = (k) => localStorage.getItem(`cw_${k}:${m.agent}`) || undefined;
   await api('/api/send', { agent: m.agent, sessionId: m.sessionId, key: m.sessionId ? undefined : m.key, dir: ui.group.dir, text, images,
-    model: get('model'), effort: get('effort'), group: ui.group.id });
+    model: m.model || undefined, effort: m.effort || undefined, group: ui.group.id });
   if (!m.running) {
     m.running = true;
     renderMemberHead(m);
@@ -3497,8 +3661,10 @@ async function sendToGroup(text, images) {
   const isNew = !ui.group;
   if (isNew) {
     const agents = [...ui.draftAgents];
-    ui.group = { id: randomId(), dir: ui.dir, agents, members: agents.map((a) => makeMember(a, 'new-' + randomId(), null)), active: agents[0] };
+    const picks = ui.draftPicks || {};
+    ui.group = { id: randomId(), dir: ui.dir, agents, members: agents.map((a) => makeMember(a, 'new-' + randomId(), null, picks[a])), active: agents[0] };
     ui.draftAgents = [];
+    ui.draftPicks = {};
     resetView();
     renderGroupView();
     renderAgentPicker();
@@ -3525,6 +3691,7 @@ async function sendToGroup(text, images) {
       const agents = group.agents;
       newConversation();
       ui.draftAgents = agents;
+      ui.draftPicks = Object.fromEntries(group.members.map((m) => [m.agent, { model: m.model, effort: m.effort }]));
       renderAgentPicker();
       renderEmptyState();
       setRunning(false);

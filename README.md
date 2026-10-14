@@ -243,7 +243,12 @@ store when you leave it, for another conversation or by closing the page
 
 **Compare…** beside the agent picker asks several agents the same thing:
 tick the agents, send one message, and each answers in its own
-conversation, shown side by side (tabs on a phone). The message box at
+conversation, shown side by side (tabs on a phone). **Fast**, **Balanced**
+or **Best** in the dialog picks a matched model and effort for each agent
+(Balanced is Sonnet, GPT-6.1-Sol and Gemini 3.8 Flash Medium at medium
+effort), so no agent's top model is up against another's cheapest. A model
+changed by hand for an agent sticks for that tier, on every device. Each
+column names the model it answers with. The message box at
 the bottom goes to all of them; each column has a box of its own for a
 message to that agent alone. **Stop** stops them all, and permission
 prompts appear in the column they belong to. In

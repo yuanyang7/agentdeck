@@ -32,6 +32,7 @@ import { collect as collectStats } from './lib/stats.mjs';
 import { autoResume, setAutoResume } from './lib/resume.mjs';
 import { CHAT_DIR, UPLOADS_DIR, CHAT_MODE } from './lib/chat-mode.mjs';
 import * as groups from './lib/groups.mjs';
+import * as compare from './lib/compare.mjs';
 import * as memory from './lib/memory.mjs';
 import * as privates from './lib/private.mjs';
 
@@ -1000,6 +1001,36 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (p === '/api/compare' && req.method === 'GET') {
+      // The tier several agents are asked in, and each agent's model and
+      // effort in every tier (lib/compare.mjs).
+      const list = await availableBackends();
+      const all = await Promise.all(list.map(async (b) => [b.id, await b.options().catch(() => null)]));
+      const picks = {};
+      for (const { value: t } of compare.TIERS) {
+        picks[t] = {};
+        for (const [id, o] of all) if (o) picks[t][id] = compare.pick(id, o, t);
+      }
+      return send(res, 200, { tier: compare.tier(), tiers: compare.TIERS, picks });
+    }
+
+    if (p === '/api/compare' && req.method === 'POST') {
+      // { tier } picks the tier; with { agent, model, effort } too, that
+      // agent's model in it, or with { agent, reset } the tier's own again.
+      const { tier, agent, model, effort, reset } = await readJson(req);
+      if (!compare.isTier(tier)) return send(res, 400, { error: 'Bad tier' });
+      if (agent == null) {
+        compare.setTier(tier);
+        return send(res, 200, { ok: true });
+      }
+      const backend = await backendFor(agent);
+      if (!backend) return send(res, 400, { error: 'Unknown agent' });
+      if (!validName(model) || !validName(effort)) return send(res, 400, { error: 'Bad model or effort' });
+      if (reset) compare.resetPick(agent, tier);
+      else compare.setPick(agent, await backend.options(), tier, model, effort);
+      return send(res, 200, { ok: true, pick: compare.pick(agent, await backend.options(), tier) });
+    }
+
     if (p === '/api/group' && req.method === 'GET') {
       // The conversations of a group of agents asked the same thing, with
       // each one's state as the sidebar shows it (lib/groups.mjs).
@@ -1010,7 +1041,8 @@ const server = http.createServer(async (req, res) => {
       const members = g.agents.map((agent) => {
         const sessionId = g.members[agent] || null;
         const chat = chats.find((c) => c.agent === agent && (sessionId ? c.id === sessionId : !c.id && c.group?.id === id));
-        return { agent, sessionId, key: chat?.key || (sessionId ? `${agent}:${sessionId}` : null),
+        const { model = null, effort = null } = (sessionId && settingsOf(agent, sessionId)) || {};
+        return { agent, sessionId, key: chat?.key || (sessionId ? `${agent}:${sessionId}` : null), model, effort,
           ...(chat && { title: chat.title, running: chat.running, pendingCount: chat.pendingCount, unread: chat.unread, updatedAt: chat.updatedAt }) };
       });
       return send(res, 200, { id, dir: g.dir, agents: g.agents, members });
