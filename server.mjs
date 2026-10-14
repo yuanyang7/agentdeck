@@ -1,5 +1,5 @@
 // agentdeck: a small web UI for driving coding-agent conversations (Claude
-// Code, Codex, opencode) on this machine from other devices on your Tailscale
+// Code, Codex, opencode, Gemini) on this machine from other devices on your Tailscale
 // network.
 //
 // This file is the HTTP layer. Live turns are run by lib/hub.mjs, and each
@@ -30,6 +30,7 @@ import { routeTask, MODEL as ROUTE_MODEL } from './lib/router.mjs';
 import * as feedbackloop from './lib/feedbackloop.mjs';
 import { collect as collectStats } from './lib/stats.mjs';
 import { autoResume, setAutoResume } from './lib/resume.mjs';
+import { CHAT_DIR, UPLOADS_DIR } from './lib/chat-mode.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STARTED = Date.now(); // pages compare this to tell a restarted server from the old one
@@ -203,12 +204,13 @@ const deviceInfo = async (req) => ({ name: devices.nameOf(req.headers['user-agen
 const streams = new Map();
 
 // Every conversation starts with a map of the projects (lib/workspace-index.mjs),
+// except a chat (lib/chat-mode.mjs), which isn't about them;
 // a message naming one of them offers it as an extra folder (lib/folders.mjs),
 // and a project made during a turn is offered as a place to move the chat.
 // A chat paused at a plan limit continues with its own agent once it resets.
 const hub = new Hub({
   backend: (id) => backends.get(id),
-  instructions: () => workspaceIndex(listProjects, PROJECT_ROOTS),
+  instructions: async (dir) => (sameFolder(dir, CHAT_DIR) ? null : workspaceIndex(listProjects, PROJECT_ROOTS)),
   mentions: (text, dir, dirs) => mentionedFolders(text, rootFolders(PROJECT_ROOTS), dir, dirs),
   created: (dir, since) => newProjects(dir, since),
 });
@@ -393,7 +395,9 @@ setInterval(async () => {
 
 async function listProjects() {
   const byDir = new Map();
-  // `inRoot`: directly under a project root, rather than any folder with chats.
+  // The Chat workspace first (lib/chat-mode.mjs), then `inRoot`: directly
+  // under a project root, rather than any folder with chats.
+  byDir.set(CHAT_DIR, { dir: CHAT_DIR, name: 'Chat', chat: true, lastModified: 0, sessions: 0, recent: [], attention: [], tagged: [] });
   for (const { dir, name } of rootFolders(PROJECT_ROOTS)) {
     byDir.set(dir, { dir, name, inRoot: true, lastModified: 0, sessions: 0, recent: [], attention: [], tagged: [] });
   }
@@ -434,7 +438,7 @@ async function listProjects() {
     p.attention.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     p.recent = p.recent.slice(0, 3);
   }
-  return [...byDir.values()].sort((a, b) => b.lastModified - a.lastModified || a.name.localeCompare(b.name));
+  return [...byDir.values()].sort((a, b) => (b.chat || 0) - (a.chat || 0) || b.lastModified - a.lastModified || a.name.localeCompare(b.name));
 }
 
 // Every agent's conversations in one folder, newest first.
@@ -531,7 +535,7 @@ const FILE_TYPES = {
 };
 const MAX_IMAGE_FILE_BYTES = 50 * 1024 * 1024; // videos and audio are streamed, so they have no cap
 
-const UPLOADS = path.join(os.homedir(), '.agentdeck', 'uploads');
+const UPLOADS = UPLOADS_DIR;
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 
 // The byte range a `Range: bytes=a-b` header asks for, or null for the whole
@@ -1219,6 +1223,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// Chats live here (lib/chat-mode.mjs); agents are started in it.
+fs.mkdirSync(CHAT_DIR, { recursive: true });
+
 server.listen(PORT, HOST, () => {
   console.log(`agentdeck listening on http://${HOST}:${PORT}`);
   if (canonicalHost) {
@@ -1229,6 +1236,7 @@ server.listen(PORT, HOST, () => {
   console.log(`Approved devices: ${approved}${approved ? '' : ' (open agentdeck in a browser, then run `npm run approve` here)'}`);
   if (PASSWORD) console.log('Password: on (it also approves a device)');
   console.log(`Project roots: ${PROJECT_ROOTS.join(', ')}`);
+  console.log(`Chat folder: ${CHAT_DIR}`);
   console.log(`Workspace index for agents: ${workspaceIndexEnabled ? 'on' : 'off'}`);
   availableBackends().then((list) => console.log(`Agents: ${list.map((b) => b.label).join(', ')}`));
   toolhub.probe(); // prints whether a Tool Hub answered, once it has (or hasn't)
