@@ -464,8 +464,6 @@ body.stats-open { overflow: hidden; }
 .col-head { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--card) 60%, var(--bg)); font-size: 12px; }
 .col-name { font-weight: 720; font-size: 13px; white-space: nowrap; }
 .col-state { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.col-only { flex: none; min-height: 28px; padding: 3px 9px; font-size: 11px; border-radius: 8px; }
-.col-only.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .col-open { flex: none; font-size: 11px; font-weight: 650; color: var(--accent); text-decoration: none; }
 .col-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 20px 18px 28px; scrollbar-width: thin; }
 .col-body > * { flex: none; min-width: 0; }
@@ -473,6 +471,11 @@ body.stats-open { overflow: hidden; }
 .compare .msg-fork { display: none; }
 .col-pending { max-height: 45%; overflow-y: auto; padding: 0 12px; }
 .col-pending:empty { display: none; }
+.col-composer { display: flex; align-items: flex-end; gap: 6px; padding: 8px 12px 10px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--card) 60%, var(--bg)); }
+.col-input { flex: 1; min-width: 0; min-height: 34px; max-height: 160px; resize: none; padding: 7px 10px; font-size: 13px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; outline: none; }
+.col-input:focus-visible { border-color: var(--accent); }
+.col-input::placeholder { color: var(--muted); }
+.col-send { flex: none; min-height: 34px; padding: 6px 11px; font-size: 12px; }
 .col-tabs { display: none; }
 .col-tab .dot { margin: 0 0 0 6px; }
 .col-empty { color: var(--muted); font-size: 12px; text-align: center; margin: auto 0; }
@@ -486,6 +489,7 @@ body.stats-open { overflow: hidden; }
   .col.active { display: flex; }
   .col-head { padding: 8px 14px; }
   .col-body { padding: 16px 14px 24px; }
+  .col-input { font-size: 16px; }
   .sidebar { position: fixed; z-index: 30; inset: 0 auto 0 0; width: min(330px, 87vw); height: 100dvh; transform: translateX(-105%); transition: transform .22s ease; box-shadow: none; }
   .sidebar.open { transform: none; box-shadow: 12px 0 36px rgba(20, 26, 48, .2); }
   .sidebar-backdrop { display: block; position: fixed; z-index: 29; inset: 0; background: rgba(22, 26, 42, .42); opacity: 0; visibility: hidden; transition: opacity .22s, visibility .22s; }

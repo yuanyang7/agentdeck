@@ -393,7 +393,8 @@ otherwise the agent's `readOnlyMode` (Claude Code `plan`, Codex
 `read-only`, opencode `plan`, Gemini `default`), whatever the request
 says. Each member uses the model and effort last picked for its agent in
 that browser. Follow-ups are the same request with the member's
-`sessionId`; a member mid-turn queues it as usual. Gemini takes no images,
+`sessionId`, from the composer at the bottom (every member) or a column's
+own box (that member, text only); a member mid-turn queues it as usual. Gemini takes no images,
 so a message with images reaches it as text only. The compare view is
 `openGroup`, `sendToGroup` and the member functions in `public/app.js`:
 each column keeps its own items and elements and takes the live events for
