@@ -205,9 +205,25 @@ call to a cheap model (Sonnet, by default) reads the workspace index and
 names the project the task is about; the page then opens a new chat there
 and sends the task as typed, with the agent, model and mode the composer
 shows. The chat starts with a line saying which project was picked and why.
-When no project fits, or the guess is a weak one, the task stays in the
-composer for you to place. See
+When the guess is a weak one, it asks first. When no project fits, it
+offers to ask the question as a [chat](#chat) instead, or leaves the task
+in the composer for you to place. See
 [docs/REFERENCE.md](docs/REFERENCE.md#just-ask).
+
+### Chat
+
+**Chat**, first in the workspace list, is for conversations that aren't
+about a project, as in the Claude app. A new conversation there starts in
+**Chat** mode, which every agent offers: it answers in the chat, can search
+the web and read files you drop into a message, and doesn't edit files or
+run commands. Chats are the agent's own sessions in one folder of their own
+(`~/.agentdeck/chat`), so they list, continue, fork, tag and resume in a
+terminal like any other conversation, and show in **Stats**. The other
+modes are there too, for when a chat should actually do something, and a
+chat that turns into work can **Move…** to a project. Chat mode is only
+offered in Chat; a project chat never starts in it. See
+[docs/REFERENCE.md](docs/REFERENCE.md#chat) for what each agent does with
+it.
 
 ### Folders
 

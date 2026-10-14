@@ -101,6 +101,8 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 .foot-links { display: flex; gap: 12px; flex: none; }
 .foot-link { flex: none; margin: 0; padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 11px; font-weight: 650; }
 .workspace-group { margin: 3px 9px 11px; border: 1px solid var(--border); background: color-mix(in srgb, var(--card) 45%, transparent); border-radius: 14px; overflow: hidden; }
+/* The Chat workspace isn't a folder of yours: dashed, like a note rather than a box. */
+.workspace-group.chat { border-style: dashed; }
 .workspace-heading { width: 100%; border: 0; border-radius: 0; background: transparent; text-align: left; display: flex; flex-direction: column; gap: 1px; padding: 11px 13px; }
 .workspace-heading.selected { background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .workspace-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 720; }

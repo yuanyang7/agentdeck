@@ -35,6 +35,14 @@ const randomId = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) =
 
 const agentLabel = (id) => ui.agents.find((a) => a.id === id)?.label || id;
 
+// The Chat workspace: conversations about nothing in particular, with a
+// *Chat* mode every agent offers there (lib/chat-mode.mjs). Just ask has no
+// workspace until its message is routed.
+const CHAT_MODE = 'chat';
+const chatProject = () => ui.projects.find((p) => p.chat) || null;
+const inChat = () => !ui.ask && !!ui.dir && ui.dir === chatProject()?.dir;
+const subtitleFor = () => (inChat() ? 'Not in a project' : ui.dir || '');
+
 // ---------- api ----------
 
 async function api(path, body) {
@@ -374,7 +382,7 @@ function renderSessions() {
   }
   renderTags();
   for (const p of ui.projects) {
-    const section = el('section', 'workspace-group');
+    const section = el('section', 'workspace-group' + (p.chat ? ' chat' : ''));
     const head = el('button', 'workspace-heading' + (p.dir === ui.dir ? ' selected' : ''));
     head.type = 'button';
     head.title = p.dir;
@@ -530,19 +538,33 @@ async function routeToProject(text) {
   $('status').textContent = '';
   if (!ui.ask || ui.key) return false; // the page moved on meanwhile
   if (!r.dir) {
-    alert(`Could not tell which project this is about.${r.reason ? ' ' + r.reason : ''}\nPick a workspace and send it there.`);
-    return false;
+    const why = r.reason ? ' ' + r.reason : '';
+    if (!chatProject()) {
+      alert(`Could not tell which project this is about.${why}\nPick a workspace and send it there.`);
+      return false;
+    }
+    if (!confirm(`This doesn’t seem to be about a project.${why}\nAsk it as a chat instead?`)) return false;
+    await leaveAsk(chatProject().dir);
+    $('mode').value = CHAT_MODE;
+    return true;
   }
   if (r.confidence === 'low' && !confirm(`Not sure which project this is. Send it to ${r.name}?\n${r.reason}`)) return false;
-  const changed = r.dir !== ui.dir;
-  setProject(r.dir);
+  await leaveAsk(r.dir);
+  upsert({ id: 'route-' + randomId(), kind: 'notice', text: `Sent to ${r.name} (${r.confidence} confidence, ${r.model}): ${r.reason}` });
+  return true;
+}
+
+// Just ask's message has a workspace now: the page becomes a new chat there,
+// with that workspace's modes in the picker.
+async function leaveAsk(dir) {
+  const changed = dir !== ui.dir;
+  setProject(dir);
   ui.ask = false;
   $('just-ask').classList.remove('on');
   $('title').textContent = 'New conversation';
-  $('subtitle').textContent = r.dir;
+  $('subtitle').textContent = subtitleFor();
+  await fillPickers();
   if (changed) await loadSessions();
-  upsert({ id: 'route-' + randomId(), kind: 'notice', text: `Sent to ${r.name} (${r.confidence} confidence, ${r.model}): ${r.reason}` });
-  return true;
 }
 
 const mobileSidebar = matchMedia('(max-width: 760px)');
@@ -609,12 +631,16 @@ function newConversation(ask = false) {
   mark.src = '/agentdeck-icon.png';
   mark.alt = '';
   empty.appendChild(mark);
-  empty.appendChild(el('h2', '', ui.ask ? 'What needs doing?' : 'What are we building today?'));
+  empty.appendChild(el('h2', '', ui.ask ? 'What needs doing?' : inChat() ? 'What’s on your mind?' : 'What are we building today?'));
   const intro = el('p');
   if (ui.ask) {
     intro.append('Describe the task. A quick model call picks the ');
     intro.appendChild(el('span', 'empty-project', 'project'));
     intro.append(' and the work starts there.');
+  } else if (inChat()) {
+    intro.append('A conversation in ');
+    intro.appendChild(el('span', 'empty-project', 'no project'));
+    intro.append('. The agent answers here, can search the web and read files you drop in, and won’t touch your code.');
   } else {
     intro.append('Start a conversation in ');
     intro.appendChild(el('span', 'empty-project', ui.dir?.split('/').pop() || 'this project'));
@@ -623,7 +649,7 @@ function newConversation(ask = false) {
   empty.appendChild(intro);
   $('messages').appendChild(empty);
   $('title').textContent = ui.ask ? 'Just ask' : 'New conversation';
-  $('subtitle').textContent = ui.ask ? 'Project picked from your message' : ui.dir || '';
+  $('subtitle').textContent = ui.ask ? 'Project picked from your message' : subtitleFor();
   selectAgent(localStorage.getItem('cw_agent'));
   setRunning(false);
   renderSessions();
@@ -647,7 +673,7 @@ async function openConversation(agent, id) {
   renderSessions();
   const s = ui.sessions.find((x) => x.key === key);
   $('title').textContent = s?.title || 'Conversation';
-  $('subtitle').textContent = ui.dir;
+  $('subtitle').textContent = subtitleFor();
 
   const data = await api(`/api/sessions/${agent}/${encodeURIComponent(id)}?dir=${encodeURIComponent(dir)}`);
   if (ui.key !== key || ui.dir !== dir) return;
@@ -936,7 +962,7 @@ function openMoveDialog(suggested) {
   if (!ui.sessionId || ui.running) return;
   mover.chat = { agent: ui.agent, sessionId: ui.sessionId, key: ui.key, dir: ui.dir, title: $('title').textContent };
   const projects = ui.projects.filter((p) => p.dir !== ui.dir);
-  const options = [['', 'Pick a workspace…'], ...projects.map((p) => [p.dir, p.inRoot ? p.name : p.dir]), ['__other__', 'Other folder…']];
+  const options = [['', 'Pick a workspace…'], ...projects.map((p) => [p.dir, p.inRoot || p.chat ? p.name : p.dir]), ['__other__', 'Other folder…']];
   if (suggested && !projects.some((p) => p.dir === suggested)) options.splice(1, 0, [suggested, suggested]);
   fillSelect($('move-to'), options, suggested || '');
   $('move-error').textContent = '';
@@ -1216,6 +1242,15 @@ function announcePending(message) {
   pendingAnnouncementTimer = setTimeout(() => { $('announcement').textContent = message; }, 50);
 }
 
+// What the message box says: a Just ask task, a message to queue behind the
+// running turn, a question in Chat (lib/chat-mode.mjs), or a message.
+function composerPlaceholder(running, queues) {
+  const who = agentLabel(ui.agent);
+  if (ui.ask && !running) return `Describe a task for ${who}; the project is picked for you…`;
+  if (queues) return `Queue a message for ${who}…`;
+  return inChat() ? `Ask ${who} anything…` : `Message ${who}…`;
+}
+
 function setRunning(running) {
   ui.running = running;
   if (!running) ui.waiting = false;
@@ -1228,7 +1263,7 @@ function setRunning(running) {
   $('stop').title = ui.waiting ? 'Stop the background tasks and end the turn' : '';
   $('send').firstChild.textContent = queues ? 'Queue ' : 'Send ';
   $('send').title = paused ? 'Runs when the limit resets' : queues ? 'Runs after the current turn finishes' : '';
-  $('input').placeholder = ui.ask && !running ? `Describe a task for ${agentLabel(ui.agent)}; the project is picked for you…` : `${queues ? 'Queue a message for' : 'Message'} ${agentLabel(ui.agent)}…`;
+  $('input').placeholder = composerPlaceholder(running, queues);
   $('status').classList.remove('status-error');
   $('status').removeAttribute('role');
   $('status').innerHTML = '';
@@ -1734,7 +1769,7 @@ async function selectAgent(agent) {
   hideCommandMenu();
   $('agent').value = agent;
   $('agent').disabled = !!ui.key;
-  $('input').placeholder = ui.ask ? `Describe a task for ${agentLabel(agent)}; the project is picked for you…` : `Message ${agentLabel(agent)}…`;
+  $('input').placeholder = composerPlaceholder(ui.running, ui.running && !ui.waiting);
   let o;
   try {
     o = await loadOptions(agent);
@@ -1761,7 +1796,8 @@ async function selectAgent(agent) {
 function picked() {
   if (ui.key) return ui.settings || { model: null, effort: null, mode: null };
   const get = (k) => localStorage.getItem(`cw_${k}:${ui.agent}`) || null;
-  return { model: get('model'), effort: get('effort'), mode: get('mode') };
+  // A new chat in the Chat workspace starts in Chat mode.
+  return { model: get('model'), effort: get('effort'), mode: inChat() ? CHAT_MODE : get('mode') };
 }
 
 const PICKS = ['model', 'effort', 'mode'];
@@ -1772,8 +1808,11 @@ async function fillPickers() {
   const agent = ui.agent;
   const o = await loadOptions(agent);
   if (ui.agent !== agent) return;
-  // A running turn reports the mode it is actually in.
-  fillSelect($('mode'), o.modes.map((m) => [m.value, m.label]), ui.mode || picked().mode || o.defaultMode);
+  // A running turn reports the mode it is actually in. Chat mode is offered
+  // in the Chat workspace, and kept by a chat that has it anywhere.
+  const mode = ui.mode || picked().mode || o.defaultMode;
+  const modes = o.modes.filter((m) => m.value !== CHAT_MODE || inChat() || mode === CHAT_MODE);
+  fillSelect($('mode'), modes.map((m) => [m.value, m.label]), mode);
   fillSelect(
     $('model'),
     [['', o.defaultModel ? `Default (${o.defaultModel})` : 'Default model'], ...o.models.map((m) => [m.value, m.label])],
@@ -1809,7 +1848,9 @@ $('agent').addEventListener('change', () => {
 async function pickChanged(before = ui.settings) {
   const next = currentPick();
   if (!ui.key) {
-    for (const k of PICKS) localStorage.setItem(`cw_${k}:${ui.agent}`, next[k] || '');
+    // The mode picked in the Chat workspace stays there: new chats start in
+    // Chat mode, and projects never offer it.
+    for (const k of PICKS) if (k !== 'mode' || !inChat()) localStorage.setItem(`cw_${k}:${ui.agent}`, next[k] || '');
     return;
   }
   if (samePick(next, before)) return;
@@ -2576,7 +2617,7 @@ function loadProjectBar() {
 
 async function loadHub() {
   const dir = ui.dir;
-  if (!dir || hubState.disabled) return;
+  if (!dir || hubState.disabled || inChat()) return;
   const r = await api('/api/hub?dir=' + encodeURIComponent(dir));
   if (dir !== ui.dir) return;
   hubState = { dir, hub: r.hub, tool: r.tool || null, disabled: !!r.disabled };
@@ -2585,7 +2626,7 @@ async function loadHub() {
 
 async function loadFeedback() {
   const dir = ui.dir;
-  if (!dir || fbState.disabled) return;
+  if (!dir || fbState.disabled || inChat()) return;
   const r = await api('/api/feedback?dir=' + encodeURIComponent(dir));
   if (dir !== ui.dir) return;
   fbState = { dir, feedback: r.feedback || null, disabled: !!r.disabled };
@@ -2977,7 +3018,8 @@ async function start() {
   sel.classList.toggle('hidden', ui.agents.length < 2);
   const projects = await loadProjects();
   const h = readHash();
-  const dir = h.dir || projects[0]?.dir;
+  // A fresh page opens in the latest project; Chat is listed first but isn't one.
+  const dir = h.dir || (projects.find((p) => !p.chat) || projects[0])?.dir;
   if (dir) setProject(dir);
   startHubPolling();
   startUsageAlerts();

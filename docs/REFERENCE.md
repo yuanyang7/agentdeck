@@ -19,6 +19,7 @@ Detailed configuration and internals for agentdeck. Start with
 | `OPENCODE_URL`  | none                        | Use an already running `opencode serve` instead of starting one (with `OPENCODE_SERVER_PASSWORD` if it has one). |
 | `WORKSPACE_INDEX` | on                        | `off` stops giving agents the [workspace index](#workspace-index). |
 | `ROUTE_MODEL`   | `sonnet`                    | Model that picks the project for [Just ask](#just-ask); any name Claude Code's `--model` accepts. |
+| `CHAT_DIR`      | `~/.agentdeck/chat`         | Folder [chats](#chat) run in; it is the **Chat** workspace. |
 | `AGENTDECK_SUPERVISED` | detected               | `1` if something restarts agentdeck when it exits, `0` if nothing does; see [Quick actions](#quick-actions). |
 | `TOOL_HUB_URL`  | `http://127.0.0.1:8765`     | Where [Tool Hub](#tool-hub) answers, for the project bar; `off` disables it. |
 | `FEEDBACK_LOOP` | on                          | `off` hides the [feedback-loop](#feedback-loop) entries in the project bar. |
@@ -341,6 +342,39 @@ confidence is `low`, it asks before sending. Picking a workspace, opening a
 chat or pressing **New conversation** leaves the Just ask state. A message
 with only images can't be routed; add words.
 
+## Chat
+
+Chats (`lib/chat-mode.mjs`) are ordinary conversations whose folder is
+`CHAT_DIR`, which the sidebar lists first as **Chat** and which never gets
+the [workspace index](#workspace-index). There, every agent's mode menu
+starts with **Chat**, and a new conversation starts in it. It is a general
+assistant: it answers in the chat, searches the web and reads files dropped
+into a message (they are copied to `~/.agentdeck/uploads`, which a chat may
+read without asking), and doesn't edit files or run commands. Each agent
+does it its own way:
+
+- **Claude Code**: runs as *Ask before actions* with a short assistant
+  prompt in place of its coding one (not recorded with the session, so a
+  later mode switch gets the coding prompt back), only the `WebSearch`,
+  `WebFetch` and `Read` tools, the first two allowed without asking, plus
+  any MCP tools configured for Claude Code, which ask before use as usual.
+- **Codex**: *Read only* with the chat instructions added to its developer
+  instructions. Codex records those when a thread starts, so they only
+  reach a chat that starts in Chat mode.
+- **opencode**: its `plan` agent, which reads but doesn't edit, with the
+  chat instructions as a `chat-mode` instruction entry on the session (the
+  same experimental API as the workspace index), stored when the session is
+  created.
+- **Gemini**: *Read only*, with the chat instructions in front of the first
+  message like the workspace index.
+
+The mode is stored with the chat like any other, so every device continues
+it the same way. In the Chat workspace, the mode picked for a new
+conversation isn't remembered across chats the way model and effort are:
+each new one starts in Chat mode. A chat opened in a project (after
+**Move…**) keeps Chat mode in its menu until it is switched; projects never
+offer it otherwise.
+
 ## Extra folders
 
 Besides its own folder, a chat can have up to 10 extra folders that the
@@ -647,6 +681,8 @@ its own, and the prompt leaves the address once the page has read it.
 - `lib/items.mjs`: the agent-neutral transcript format the page renders.
 - `lib/workspace-index.mjs`: the project map given to agents.
 - `lib/router.mjs`: Just ask, picking the project a task is about.
+- `lib/chat-mode.mjs`: the Chat workspace's folder, the Chat mode and its
+  instructions; each agent in `lib/agents/` maps the mode onto its own.
 - `lib/folders.mjs`: a chat's extra folders: checking them and spotting
   projects a message names.
 - `lib/commands.mjs`: reading a `/name` message and caching each folder's
