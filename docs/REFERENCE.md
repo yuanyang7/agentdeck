@@ -402,7 +402,11 @@ stops any running turn and calls the agent's `delete`: Claude Code's
 transcript and its folder of subagent transcripts are removed; Codex's
 thread is archived and its rollout file removed (Codex's index keeps the
 archived entry); opencode's session is deleted through its API; Gemini's
-conversation database and summary row are removed. At startup agentdeck
+conversation database and summary row are removed, and so is its record
+in `jetbox_summaries_proto.pb`, the cache Antigravity CLI writes the rows
+back from when it starts (without that, the title and preview came back on
+its next run). agentdeck's own records of the chat (settings, tags, the
+unread flag) go too. At startup agentdeck
 deletes any private session still listed, which a closed page left
 behind. A private chat can't be moved or forked. Compare (several agents)
 isn't private.

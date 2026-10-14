@@ -20,7 +20,7 @@ import { Hub, BusyError } from './lib/hub.mjs';
 import { backends, availableBackends } from './lib/agents/index.mjs';
 import { tagsOf, setTags, quickTags, setQuickTags } from './lib/tags.mjs';
 import { isUnread, markRead } from './lib/reads.mjs';
-import { settingsOf, setSettings } from './lib/chat-settings.mjs';
+import { settingsOf, setSettings, forgetSettings } from './lib/chat-settings.mjs';
 import { workspaceIndex, enabled as workspaceIndexEnabled } from './lib/workspace-index.mjs';
 import { rootFolders, checkFolders, mentionedFolders } from './lib/folders.mjs';
 import * as devices from './lib/devices.mjs';
@@ -1308,6 +1308,10 @@ async function endPrivate(backend, sessionId, dir) {
     console.error(`${backend.id} delete ${sessionId} failed:`, err.message);
   }
   privates.remove(backend.id, sessionId);
+  // agentdeck's own records of it: settings, tags, the unread flag.
+  forgetSettings(backend.id, sessionId);
+  setTags(backend.id, sessionId, []);
+  markRead(backend.id, sessionId);
   hub.live.delete(`${backend.id}:${sessionId}`);
   hub.broadcast({ type: 'sessions_changed', dir });
 }
