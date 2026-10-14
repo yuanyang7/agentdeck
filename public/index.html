@@ -54,7 +54,7 @@
         <div class="title">
           <div class="topbar-eyebrow">WORKSPACE CHAT</div>
           <div id="title">New conversation</div>
-          <div class="subtitle-row"><span id="subtitle" class="muted"></span><button id="move-chat" class="move-chat hidden" type="button" title="Move this chat to another workspace">Move…</button></div>
+          <div class="subtitle-row"><span id="subtitle" class="muted"></span><button id="move-chat" class="move-chat hidden" type="button" title="Move this chat to another workspace">Move…</button><button id="end-private" class="move-chat hidden" type="button" title="Delete this private chat now">End private chat</button></div>
         </div>
         <div id="project-bar" class="project-bar hidden" role="group" aria-label="Project">
           <span class="project-bar-label"><span class="hub-dot" aria-hidden="true"></span><span class="hub-name"></span></span>
@@ -112,6 +112,7 @@
             <select id="effort" title="Effort" aria-label="Effort"></select>
             <button type="button" id="folders" class="folders-button" aria-haspopup="dialog">📁 Folders</button>
             <button type="button" id="memory" class="folders-button hidden" aria-haspopup="dialog" title="What chats remember across conversations">Memory</button>
+            <button type="button" id="private" class="folders-button hidden" aria-pressed="false" title="A private chat: no memory in or out, not listed, deleted when you leave it">Private</button>
           </div>
           <div class="composer-actions">
             <button type="button" id="attach" title="Attach images or files (or paste / drop them)" aria-label="Attach images or files">＋</button>

@@ -15,6 +15,8 @@ const ui = {
   ask: false, // "Just ask": a new chat whose project is picked from the message (see /api/route)
   group: null, // several agents asked the same thing: { id, dir, agents, members, active } (see openGroup)
   draftAgents: [], // the agents a new conversation will ask, when more than one
+  private: false, // the next new chat is private (lib/private.mjs): no memory, not listed, deleted on leaving
+  isPrivate: false, // the open conversation is private
   pending: [],
   queue: [], // messages waiting for the running turn: [{ id, text, images (count) }]
   tasks: [], // the running turn's background tasks: [{ id, type, description }]
@@ -43,7 +45,7 @@ const agentLabel = (id) => ui.agents.find((a) => a.id === id)?.label || id;
 const CHAT_MODE = 'chat';
 const chatProject = () => ui.projects.find((p) => p.chat) || null;
 const inChat = () => !ui.ask && !!ui.dir && ui.dir === chatProject()?.dir;
-const subtitleFor = () => (inChat() ? 'Not in a project' : ui.dir || '');
+const subtitleFor = () => (inChat() ? `Not in a project${(ui.key ? ui.isPrivate : ui.private) ? ' · Private' : ''}` : ui.dir || '');
 
 // ---------- api ----------
 
@@ -75,7 +77,7 @@ function writeHash() {
   const h = new URLSearchParams();
   if (ui.dir) h.set('dir', ui.dir);
   if (ui.group) h.set('g', ui.group.id);
-  else if (ui.sessionId) {
+  else if (ui.sessionId && !ui.isPrivate) {
     h.set('a', ui.agent);
     h.set('s', ui.sessionId);
   }
@@ -622,15 +624,18 @@ function resetView() {
 // With `ask`, the chat has no workspace yet: the first message is routed to
 // the project it is about and sent there (see the composer's submit).
 function newConversation(ask = false) {
+  endPrivateChat();
   ui.key = null;
   ui.sessionId = null;
   ui.running = false;
   ui.draftDirs = [];
   ui.draftAgents = [];
+  ui.private = false;
   ui.ask = !!ask;
   leaveGroup();
   $('just-ask').classList.toggle('on', ui.ask);
   renderFolders();
+  renderPrivate();
   resetView();
   renderEmptyState();
   $('title').textContent = ui.ask ? 'Just ask' : 'New conversation';
@@ -651,9 +656,13 @@ function renderEmptyState() {
   mark.src = '/agentdeck-icon.png';
   mark.alt = '';
   empty.appendChild(mark);
-  empty.appendChild(el('h2', '', ui.ask ? 'What needs doing?' : several ? 'One question, several answers' : inChat() ? 'What’s on your mind?' : 'What are we building today?'));
+  empty.appendChild(el('h2', '', ui.ask ? 'What needs doing?' : several ? 'One question, several answers' : ui.private && inChat() ? 'A private chat' : inChat() ? 'What’s on your mind?' : 'What are we building today?'));
   const intro = el('p');
-  if (several) {
+  if (ui.private && inChat() && !several) {
+    intro.append('Nothing from earlier chats is ');
+    intro.appendChild(el('span', 'empty-project', 'remembered'));
+    intro.append(', and nothing from this one is kept. It isn’t listed in the sidebar and is deleted when you leave it.');
+  } else if (several) {
     const names = ui.draftAgents.map(agentLabel);
     intro.appendChild(el('span', 'empty-project', `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`));
     intro.append(` each answer in their own conversation, side by side. ${inChat() ? 'They chat' : `In ${folderName(ui.dir || '')} they only read`}; follow-ups go to all of them unless you reply to one.`);
@@ -676,6 +685,8 @@ function renderEmptyState() {
 
 // `id` is a session id, or the temp key of a conversation that is starting.
 async function openConversation(agent, id) {
+  endPrivateChat();
+  ui.private = false;
   const dir = ui.dir;
   const temp = id.startsWith('new-');
   ui.key = temp ? id : `${agent}:${id}`;
@@ -690,6 +701,7 @@ async function openConversation(agent, id) {
   resetView();
   selectAgent(agent);
   renderAgentPicker();
+  renderPrivate();
   writeHash();
   renderSessions();
   const s = ui.sessions.find((x) => x.key === key);
@@ -964,11 +976,11 @@ async function forkFrom(itemId, button) {
 // a running turn's transcript is incomplete. Drives the fork controls' CSS.
 async function updateForkable() {
   // Moving has the same conditions, minus the agent's options.
-  $('move-chat').classList.toggle('hidden', !(ui.sessionId && !ui.running && ui.agents.find((a) => a.id === ui.agent)?.move));
+  $('move-chat').classList.toggle('hidden', !(ui.sessionId && !ui.running && !ui.isPrivate && ui.agents.find((a) => a.id === ui.agent)?.move));
   const agent = ui.agent;
   const o = agent ? await loadOptions(agent).catch(() => null) : null;
   if (ui.agent !== agent) return;
-  $('messages').classList.toggle('can-fork', !!(o?.fork && ui.sessionId && !ui.running));
+  $('messages').classList.toggle('can-fork', !!(o?.fork && ui.sessionId && !ui.running && !ui.isPrivate));
 }
 
 // ---------- moving a chat ----------
@@ -1926,7 +1938,6 @@ function renderFolders() {
   b.textContent = dirs.length ? `📁 ${folderName(dirs[0])}${dirs.length > 1 ? ` +${dirs.length - 1}` : ''}` : '📁 Folders';
   b.classList.toggle('on', dirs.length > 0);
   b.title = dirs.length ? `Also works in:\n${dirs.join('\n')}` : 'Let this chat work in other folders too';
-  $('memory').classList.toggle('hidden', !inChat());
   if ($('folder-dialog').open) renderFolderEditor();
 }
 
@@ -1970,6 +1981,46 @@ $('memory-clear').addEventListener('click', () => {
   $('memory-text').focus();
 });
 $('memory-cancel').addEventListener('click', () => $('memory-dialog').close());
+
+// ---------- private chats ----------
+
+// A private chat (lib/private.mjs) gets no memory and keeps none, isn't
+// listed, and is deleted from its agent's store when this page leaves it:
+// for another conversation, a new one, or by closing.
+function renderPrivate() {
+  const b = $('private');
+  b.classList.toggle('hidden', !inChat() || !!ui.key || ui.draftAgents.length > 1 || ui.ask);
+  b.classList.toggle('on', ui.private);
+  b.setAttribute('aria-pressed', String(ui.private));
+  $('end-private').classList.toggle('hidden', !ui.isPrivate || !ui.key);
+  $('memory').classList.toggle('hidden', !inChat() || (ui.key ? ui.isPrivate : ui.private));
+}
+
+function endPrivateChat() {
+  if (!ui.isPrivate) return;
+  const { agent, sessionId, dir } = ui;
+  ui.isPrivate = false;
+  if (sessionId) api('/api/private/end', { agent, sessionId, dir }).catch(() => {});
+}
+
+$('private').addEventListener('click', () => {
+  ui.private = !ui.private;
+  renderPrivate();
+  renderEmptyState();
+  $('subtitle').textContent = subtitleFor();
+  $('input').focus();
+});
+
+$('end-private').addEventListener('click', () => {
+  if (!confirm('End this private chat? It is deleted now.')) return;
+  newConversation();
+});
+
+// Closing the page ends it too; the request has to outlive the page.
+addEventListener('pagehide', () => {
+  if (!ui.isPrivate || !ui.sessionId) return;
+  navigator.sendBeacon('/api/private/end', new Blob([JSON.stringify({ agent: ui.agent, sessionId: ui.sessionId, dir: ui.dir })], { type: 'application/json' }));
+});
 $('memory-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('memory-save').disabled = true;
@@ -2408,8 +2459,10 @@ $('composer').addEventListener('submit', async (e) => {
     // Our own temp key, so events sent before the reply already reach us.
     ui.key = 'new-' + randomId();
     ui.settings = { ...currentPick(), dirs };
+    ui.isPrivate = ui.private && inChat();
     $('agent').disabled = true;
     $('title').textContent = text.split('\n')[0].slice(0, 80) || '(image)';
+    renderPrivate();
   }
   try {
     await api('/api/send', {
@@ -2424,6 +2477,7 @@ $('composer').addEventListener('submit', async (e) => {
       model: $('model').value || undefined,
       effort: $('effort').value || undefined,
       dirs,
+      private: isNew && ui.isPrivate,
     });
     if (isNew) loadSessions();
     // A chat paused at a limit only queued it.
@@ -2436,7 +2490,9 @@ $('composer').addEventListener('submit', async (e) => {
   } catch (err) {
     if (isNew) {
       ui.key = null;
+      ui.isPrivate = false;
       $('agent').disabled = false;
+      renderPrivate();
     }
     alert(err.message);
   } finally {
@@ -3384,6 +3440,8 @@ function groupBound(ev) {
 }
 
 async function openGroup(id) {
+  endPrivateChat();
+  ui.private = false;
   const g = await api('/api/group?id=' + encodeURIComponent(id));
   if (g.dir !== ui.dir) {
     setProject(g.dir);
@@ -3400,6 +3458,7 @@ async function openGroup(id) {
   selectAgent(g.agents[0]);
   renderAgentPicker();
   renderFolders();
+  renderPrivate();
   $('title').textContent = g.members.find((m) => m.title)?.title || `${g.agents.length} agents`;
   $('subtitle').textContent = `${subtitleFor()} · ${g.agents.length} agents`;
   renderGroupView();
