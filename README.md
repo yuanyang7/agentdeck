@@ -229,9 +229,10 @@ it.
 
 **Compare…** beside the agent picker asks several agents the same thing:
 tick the agents, send one message, and each answers in its own
-conversation, shown side by side (tabs on a phone). Follow-ups go to all
-of them, or to one column after **Reply to this one**; **Stop** stops them
-all, and permission prompts appear in the column they belong to. In
+conversation, shown side by side (tabs on a phone). The message box at
+the bottom goes to all of them; each column has a box of its own for a
+message to that agent alone. **Stop** stops them all, and permission
+prompts appear in the column they belong to. In
 [Chat](#chat) they chat; in a project each runs in its read-only mode
 (Claude Code's Plan mode, Read only for Codex and Gemini, opencode's `plan`
 agent), so they can't trip over each other's changes. The sidebar lists the

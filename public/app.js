@@ -13,7 +13,7 @@ const ui = {
   settings: null, // { model, effort, mode, dirs } the open chat uses, as stored on the server
   draftDirs: [], // extra folders picked for a new chat before its first message
   ask: false, // "Just ask": a new chat whose project is picked from the message (see /api/route)
-  group: null, // several agents asked the same thing: { id, dir, agents, members, target, active } (see openGroup)
+  group: null, // several agents asked the same thing: { id, dir, agents, members, active } (see openGroup)
   draftAgents: [], // the agents a new conversation will ask, when more than one
   pending: [],
   queue: [], // messages waiting for the running turn: [{ id, text, images (count) }]
@@ -1268,10 +1268,7 @@ function announcePending(message) {
 function composerPlaceholder(running, queues) {
   const who = agentLabel(ui.agent);
   if (ui.ask && !running) return `Describe a task for ${who}; the project is picked for you…`;
-  if (ui.group) {
-    const to = ui.group.target ? agentLabel(ui.group.target) : `all ${ui.group.agents.length} agents`;
-    return queues ? `Queue a message for ${to}…` : ui.group.target ? `Reply to ${to} only…` : `Ask ${to}…`;
-  }
+  if (ui.group) return queues ? `Queue a message for all ${ui.group.agents.length} agents…` : `Ask all ${ui.group.agents.length} agents…`;
   if (ui.draftAgents.length > 1 && !ui.key) return `Ask ${ui.draftAgents.length} agents at once…`;
   if (queues) return `Queue a message for ${who}…`;
   return inChat() ? `Ask ${who} anything…` : `Message ${who}…`;
@@ -3048,9 +3045,9 @@ $('device-form').addEventListener('submit', (e) => {
 // A group (lib/groups.mjs): one conversation per agent, started from one
 // message in the open workspace, shown as columns (tabs on a phone). Each
 // member keeps its own items and elements, as `ui` does for one
-// conversation; the composer sends to every member, or to the one picked
-// with "Reply to this one". The server picks the mode: Chat in Chat, each
-// agent's read-only mode in a project.
+// conversation. The composer at the bottom sends to every member; each
+// column has a box of its own for a message to that agent alone. The server
+// picks the mode: Chat in Chat, each agent's read-only mode in a project.
 
 const groupMembers = () => ui.group?.members || [];
 const memberByKey = (key) => groupMembers().find((m) => m.key === key);
@@ -3135,7 +3132,7 @@ $('agents-form').addEventListener('submit', (e) => {
 
 function makeMember(agent, key, sessionId) {
   return { agent, key, sessionId, items: new Map(), els: new Map(), dirty: new Set(), raf: 0,
-    running: false, waiting: false, pending: [], queue: [], col: null, head: null, body: null, pendingBox: null, tab: null };
+    running: false, waiting: false, pending: [], queue: [], col: null, head: null, body: null, pendingBox: null, tab: null, input: null, send: null };
 }
 
 // One column per member, and a tab per member for phones.
@@ -3153,7 +3150,7 @@ function renderGroupView() {
     m.head = el('div', 'col-head');
     m.body = el('div', 'col-body');
     m.pendingBox = el('div', 'col-pending');
-    m.col.append(m.head, m.body, m.pendingBox);
+    m.col.append(m.head, m.body, m.pendingBox, memberComposer(m));
     cols.appendChild(m.col);
     m.tab = el('button', 'col-tab');
     m.tab.type = 'button';
@@ -3184,17 +3181,7 @@ function renderMemberHead(m) {
   if (m.pending.length) state.append(dot('decision'), `${m.pending.length === 1 ? 'A decision' : `${m.pending.length} decisions`} needed`);
   else if (m.running) state.append(dot(), m.waiting ? 'Waiting on background work…' : 'Working…');
   else if (m.queue.length) state.append(`${m.queue.length} queued`);
-  const only = el('button', 'col-only' + (ui.group.target === m.agent ? ' on' : ''), ui.group.target === m.agent ? 'Replying to this one' : 'Reply to this one');
-  only.type = 'button';
-  only.title = ui.group.target === m.agent ? 'Send the next message to every agent again' : `Send the next message to ${agentLabel(m.agent)} only`;
-  only.setAttribute('aria-pressed', String(ui.group.target === m.agent));
-  only.onclick = () => {
-    ui.group.target = ui.group.target === m.agent ? null : m.agent;
-    for (const x of groupMembers()) renderMemberHead(x);
-    setRunning(ui.running);
-    $('input').focus();
-  };
-  h.append(el('span', 'col-name', agentLabel(m.agent)), state, only);
+  h.append(el('span', 'col-name', agentLabel(m.agent)), state);
   if (m.sessionId) {
     const open = el('a', 'col-open', 'Open');
     open.href = `#dir=${encodeURIComponent(ui.group.dir)}&a=${m.agent}&s=${encodeURIComponent(m.sessionId)}`;
@@ -3209,6 +3196,53 @@ function renderMemberHead(m) {
   m.tab.append(el('span', '', agentLabel(m.agent)));
   if (m.pending.length) m.tab.appendChild(dot('decision'));
   else if (m.running) m.tab.appendChild(dot());
+  if (m.input) {
+    const queues = m.running && !m.waiting;
+    m.input.placeholder = m.key ? (queues ? `Queue a message for ${agentLabel(m.agent)}…` : `Message ${agentLabel(m.agent)} only…`) : `${agentLabel(m.agent)} never started`;
+    m.input.disabled = !m.key;
+    m.send.firstChild.textContent = queues ? 'Queue ' : 'Send ';
+    m.send.disabled = !m.key;
+  }
+}
+
+// A column's own message box: text only (images go through the composer at
+// the bottom), Enter sends as in the main one.
+function memberComposer(m) {
+  const form = el('form', 'col-composer');
+  m.input = el('textarea', 'col-input');
+  m.input.rows = 1;
+  m.input.setAttribute('aria-label', `Message ${agentLabel(m.agent)} only`);
+  m.input.addEventListener('input', () => {
+    m.input.style.height = 'auto';
+    m.input.style.height = Math.min(m.input.scrollHeight, 160) + 'px';
+  });
+  m.input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(pointer: coarse)').matches) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  m.send = el('button', 'col-send');
+  m.send.type = 'submit';
+  m.send.append('Send ', Object.assign(el('span', '', '↗'), { ariaHidden: 'true' }));
+  form.append(m.input, m.send);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = m.input.value.trim();
+    if (!text || m.send.disabled) return;
+    m.send.disabled = true;
+    try {
+      await sendMember(m, text, []);
+      m.input.value = '';
+      m.input.style.height = 'auto';
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      m.send.disabled = !m.key;
+      setRunning(groupMembers().some((x) => x.running));
+    }
+  });
+  return form;
 }
 
 // As upsert() and applyDelta(), for one member's column.
@@ -3296,7 +3330,7 @@ async function openGroup(id) {
   ui.draftAgents = [];
   $('just-ask').classList.remove('on');
   resetView();
-  ui.group = { id, dir: g.dir, agents: g.agents, members: g.members.map((x) => makeMember(x.agent, x.key, x.sessionId)), target: null, active: g.agents[0] };
+  ui.group = { id, dir: g.dir, agents: g.agents, members: g.members.map((x) => makeMember(x.agent, x.key, x.sessionId)), active: g.agents[0] };
   selectAgent(g.agents[0]);
   renderAgentPicker();
   renderFolders();
@@ -3319,15 +3353,26 @@ async function openGroup(id) {
   if (ui.group?.id === id) setRunning(groupMembers().some((m) => m.running));
 }
 
-// Sends to every member, or to the one picked. A new group gets an id here
-// and a temp key per member, so events reach the columns before the
-// replies; the server lists the members as their agents report session
-// ids. Each member uses the model and effort last picked for its agent.
+// One message to one member, with the model and effort last picked for its
+// agent; the server forces the group's mode.
+async function sendMember(m, text, images) {
+  const get = (k) => localStorage.getItem(`cw_${k}:${m.agent}`) || undefined;
+  await api('/api/send', { agent: m.agent, sessionId: m.sessionId, key: m.sessionId ? undefined : m.key, dir: ui.group.dir, text, images,
+    model: get('model'), effort: get('effort'), group: ui.group.id });
+  if (!m.running) {
+    m.running = true;
+    renderMemberHead(m);
+  }
+}
+
+// Sends to every member. A new group gets an id here and a temp key per
+// member, so events reach the columns before the replies; the server lists
+// the members as their agents report session ids.
 async function sendToGroup(text, images) {
   const isNew = !ui.group;
   if (isNew) {
     const agents = [...ui.draftAgents];
-    ui.group = { id: randomId(), dir: ui.dir, agents, members: agents.map((a) => makeMember(a, 'new-' + randomId(), null)), target: null, active: agents[0] };
+    ui.group = { id: randomId(), dir: ui.dir, agents, members: agents.map((a) => makeMember(a, 'new-' + randomId(), null)), active: agents[0] };
     ui.draftAgents = [];
     resetView();
     renderGroupView();
@@ -3337,17 +3382,11 @@ async function sendToGroup(text, images) {
     writeHash();
   }
   const group = ui.group;
-  const targets = group.target ? groupMembers().filter((m) => m.agent === group.target) : groupMembers().filter((m) => m.key);
+  const targets = groupMembers().filter((m) => m.key);
   const failed = [];
   for (const m of targets) {
-    const get = (k) => localStorage.getItem(`cw_${k}:${m.agent}`) || undefined;
     try {
-      await api('/api/send', { agent: m.agent, sessionId: m.sessionId, key: m.sessionId ? undefined : m.key, dir: group.dir, text, images,
-        model: get('model'), effort: get('effort'), group: group.id });
-      if (!m.running) {
-        m.running = true;
-        renderMemberHead(m);
-      }
+      await sendMember(m, text, images);
     } catch (err) {
       failed.push(`${agentLabel(m.agent)}: ${err.message}`);
       memberUpsert(m, { id: 'fail-' + randomId(), kind: 'notice', text: `Not sent — ${err.message}`, error: true });
