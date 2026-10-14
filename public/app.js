@@ -13,6 +13,8 @@ const ui = {
   settings: null, // { model, effort, mode, dirs } the open chat uses, as stored on the server
   draftDirs: [], // extra folders picked for a new chat before its first message
   ask: false, // "Just ask": a new chat whose project is picked from the message (see /api/route)
+  group: null, // several agents asked the same thing: { id, dir, agents, members, target, active } (see openGroup)
+  draftAgents: [], // the agents a new conversation will ask, when more than one
   pending: [],
   queue: [], // messages waiting for the running turn: [{ id, text, images (count) }]
   tasks: [], // the running turn's background tasks: [{ id, type, description }]
@@ -67,12 +69,13 @@ function readHash() {
   // Links from before there were several agents have no `a`; those are Claude.
   // `prompt` comes from tools that hand a task over (e.g. demoreel's dashboard):
   // it fills a new chat's composer and is never sent on its own.
-  return { dir: h.get('dir'), agent: h.get('a') || 'claude', s: h.get('s'), prompt: h.get('prompt') };
+  return { dir: h.get('dir'), agent: h.get('a') || 'claude', s: h.get('s'), g: h.get('g'), prompt: h.get('prompt') };
 }
 function writeHash() {
   const h = new URLSearchParams();
   if (ui.dir) h.set('dir', ui.dir);
-  if (ui.sessionId) {
+  if (ui.group) h.set('g', ui.group.id);
+  else if (ui.sessionId) {
     h.set('a', ui.agent);
     h.set('s', ui.sessionId);
   }
@@ -371,8 +374,8 @@ function renderSessions() {
   const workspaces = $('workspaces');
   attention.innerHTML = '';
   workspaces.innerHTML = '';
-  const needsAttention = ui.projects.flatMap((p) => p.attention || []).sort((a, b) =>
-    (b.pendingCount > 0) - (a.pendingCount > 0) || (b.updatedAt || 0) - (a.updatedAt || 0));
+  const needsAttention = collapseGroups(ui.projects.flatMap((p) => p.attention || []).sort((a, b) =>
+    (b.pendingCount > 0) - (a.pendingCount > 0) || (b.updatedAt || 0) - (a.updatedAt || 0)));
   attention.classList.toggle('hidden', !needsAttention.length);
   if (needsAttention.length) {
     attention.appendChild(el('div', 'sidebar-section-title', 'NEEDS ATTENTION'));
@@ -410,10 +413,10 @@ function renderSessions() {
     };
     section.appendChild(head);
     const expanded = ui.expandedWorkspace === p.dir && ui.dir === p.dir;
-    const rows = expanded ? ui.sessions.slice(0, ui.shownCount) : [...p.recent];
+    const rows = expanded ? collapseGroups(ui.sessions).slice(0, ui.shownCount) : collapseGroups(p.recent);
     const total = expanded ? ui.sessions.length : p.sessions;
-    const active = p.dir === ui.dir && ui.sessions.find((s) => s.key === ui.key);
-    if (active && !rows.some((s) => s.key === active.key)) rows.push(active);
+    const active = p.dir === ui.dir && ui.sessions.find((s) => (ui.group ? s.group?.id === ui.group.id : s.key === ui.key));
+    if (active && !rows.some((s) => s.key === active.key || (active.group && s.group?.id === active.group.id))) rows.push(active);
     const list = el('ul', 'sessions');
     for (const s of rows) list.appendChild(sessionRow(s));
     section.appendChild(list);
@@ -447,7 +450,7 @@ function sessionRow(s, showWorkspace = false) {
     const li = document.createElement('li');
     li.tabIndex = 0;
     li.setAttribute('role', 'button');
-    if (s.key === ui.key && s.dir === ui.dir) li.classList.add('active');
+    if (s.dir === ui.dir && (ui.group ? s.group?.id === ui.group.id : s.key === ui.key)) li.classList.add('active');
     const t = document.createElement('div');
     t.className = 's-title';
     if (s.pendingCount) {
@@ -473,7 +476,8 @@ function sessionRow(s, showWorkspace = false) {
     }
     t.appendChild(document.createTextNode(s.title || 'Untitled'));
     const meta = el('div', 's-meta');
-    if (ui.agents.length > 1) meta.appendChild(el('span', 'agent-badge', agentLabel(s.agent)));
+    // A group of agents asked the same thing is one row with every agent's badge.
+    for (const a of s.group ? s.group.agents : ui.agents.length > 1 ? [s.agent] : []) meta.appendChild(el('span', 'agent-badge', agentLabel(a)));
     meta.appendChild(document.createTextNode([showWorkspace && ui.projects.find((p) => p.dir === s.dir)?.name,
       s.pendingCount ? 'Needs decision' : s.elsewhere ? 'Working in another app' : s.running ? 'Working' : s.resumeAt ? `Continues ${resumeTime(s.resumeAt)}` : s.unread ? 'Finished · unread' : s.stopped ? 'Stopped mid-turn' : null,
       timeAgo(s.updatedAt), s.branch].filter(Boolean).join(' · ')));
@@ -498,7 +502,8 @@ function sessionRow(s, showWorkspace = false) {
       setSidebarOpen(false);
       (async () => {
         if (ui.dir !== s.dir) { setProject(s.dir); await loadSessions(); }
-        await openConversation(s.agent, s.id || s.key);
+        if (s.group) await openGroup(s.group.id);
+        else await openConversation(s.agent, s.id || s.key);
         if (keyboardFocus && !mobileSidebar.matches) document.querySelector('.sessions li.active')?.focus();
       })().catch((err) => alert(err.message));
     };
@@ -621,19 +626,38 @@ function newConversation(ask = false) {
   ui.sessionId = null;
   ui.running = false;
   ui.draftDirs = [];
+  ui.draftAgents = [];
   ui.ask = !!ask;
+  leaveGroup();
   $('just-ask').classList.toggle('on', ui.ask);
   renderFolders();
   resetView();
+  renderEmptyState();
+  $('title').textContent = ui.ask ? 'Just ask' : 'New conversation';
+  $('subtitle').textContent = ui.ask ? 'Project picked from your message' : subtitleFor();
+  selectAgent(localStorage.getItem('cw_agent'));
+  renderAgentPicker();
+  setRunning(false);
+  renderSessions();
+  writeHash();
+}
+
+// What a new conversation shows before its first message.
+function renderEmptyState() {
   $('messages').innerHTML = '';
+  const several = ui.draftAgents.length > 1;
   const empty = el('div', 'empty');
   const mark = el('img', 'empty-mark');
   mark.src = '/agentdeck-icon.png';
   mark.alt = '';
   empty.appendChild(mark);
-  empty.appendChild(el('h2', '', ui.ask ? 'What needs doing?' : inChat() ? 'What’s on your mind?' : 'What are we building today?'));
+  empty.appendChild(el('h2', '', ui.ask ? 'What needs doing?' : several ? 'One question, several answers' : inChat() ? 'What’s on your mind?' : 'What are we building today?'));
   const intro = el('p');
-  if (ui.ask) {
+  if (several) {
+    const names = ui.draftAgents.map(agentLabel);
+    intro.appendChild(el('span', 'empty-project', `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`));
+    intro.append(` each answer in their own conversation, side by side. ${inChat() ? 'They chat' : `In ${folderName(ui.dir || '')} they only read`}; follow-ups go to all of them unless you reply to one.`);
+  } else if (ui.ask) {
     intro.append('Describe the task. A quick model call picks the ');
     intro.appendChild(el('span', 'empty-project', 'project'));
     intro.append(' and the work starts there.');
@@ -648,12 +672,6 @@ function newConversation(ask = false) {
   }
   empty.appendChild(intro);
   $('messages').appendChild(empty);
-  $('title').textContent = ui.ask ? 'Just ask' : 'New conversation';
-  $('subtitle').textContent = ui.ask ? 'Project picked from your message' : subtitleFor();
-  selectAgent(localStorage.getItem('cw_agent'));
-  setRunning(false);
-  renderSessions();
-  writeHash();
 }
 
 // `id` is a session id, or the temp key of a conversation that is starting.
@@ -664,11 +682,14 @@ async function openConversation(agent, id) {
   ui.sessionId = temp ? null : id;
   ui.settings = null;
   ui.ask = false;
+  ui.draftAgents = [];
+  leaveGroup();
   $('just-ask').classList.remove('on');
   renderFolders();
   const key = ui.key;
   resetView();
   selectAgent(agent);
+  renderAgentPicker();
   writeHash();
   renderSessions();
   const s = ui.sessions.find((x) => x.key === key);
@@ -1247,6 +1268,11 @@ function announcePending(message) {
 function composerPlaceholder(running, queues) {
   const who = agentLabel(ui.agent);
   if (ui.ask && !running) return `Describe a task for ${who}; the project is picked for you…`;
+  if (ui.group) {
+    const to = ui.group.target ? agentLabel(ui.group.target) : `all ${ui.group.agents.length} agents`;
+    return queues ? `Queue a message for ${to}…` : ui.group.target ? `Reply to ${to} only…` : `Ask ${to}…`;
+  }
+  if (ui.draftAgents.length > 1 && !ui.key) return `Ask ${ui.draftAgents.length} agents at once…`;
   if (queues) return `Queue a message for ${who}…`;
   return inChat() ? `Ask ${who} anything…` : `Message ${who}…`;
 }
@@ -1269,7 +1295,8 @@ function setRunning(running) {
   $('status').innerHTML = '';
   if (running && !ui.pending.length) {
     const d = el('span', 'dot');
-    $('status').append(d, document.createTextNode(ui.waiting ? 'Waiting on background work…' : 'Working…'));
+    const working = ui.group ? `${groupMembers().filter((m) => m.running).length} of ${groupMembers().length} working…` : ui.waiting ? 'Waiting on background work…' : 'Working…';
+    $('status').append(d, document.createTextNode(working));
   }
   updateForkable();
 }
@@ -1293,6 +1320,7 @@ function connectEvents() {
     const ev = JSON.parse(e.data);
     if (ev.type === 'session_bound') {
       soundKeyBound(ev.oldKey, ev.key);
+      groupBound(ev);
       if (ui.key === ev.oldKey) {
         ui.key = ev.key;
         ui.sessionId = ev.sessionId;
@@ -1348,7 +1376,8 @@ function connectEvents() {
       soundForStatus(ev);
       scheduleSidebarRefresh();
     }
-    if (ui.key && ev.key === ui.key) handleTurnEvent(ev);
+    if (ui.group) handleGroupEvent(ev);
+    else if (ui.key && ev.key === ui.key) handleTurnEvent(ev);
   };
   es.onerror = () => {
     // Refused rather than dropped, as when this device was removed: api()
@@ -1478,14 +1507,16 @@ function renderPending() {
   if (restoreFocus) (cards[0] || $('input')).focus();
 }
 
-function makePendingCard(p) {
+// `member`: the group member the request belongs to, in the compare view;
+// otherwise it is the open conversation's.
+function makePendingCard(p, member = null) {
   const card = el('div', 'perm');
   card.tabIndex = -1;
   card.setAttribute('role', 'group');
   card.setAttribute('aria-label', p.title || 'Approval request');
   card.appendChild(el('div', 'perm-kicker', 'ACTION REQUIRED'));
   if (p.kind === 'question') {
-    renderQuestion(card, p);
+    renderQuestion(card, p, member);
   } else {
     card.appendChild(el('h4', '', p.title));
     if (p.reason) card.appendChild(el('div', 'muted', p.reason));
@@ -1501,19 +1532,19 @@ function makePendingCard(p) {
     // `choice` gives a yes/no question its own labels, with nothing to tell
     // the agent on "no".
     const allow = el('button', 'primary', p.choice?.allow || 'Allow');
-    allow.onclick = () => answer(p, { allow: true });
+    allow.onclick = () => answer(p, { allow: true }, member);
     row.appendChild(allow);
     if (p.canAlways) {
       const always = el('button', '', 'Allow & don’t ask again');
-      always.onclick = () => answer(p, { allow: true, always: true });
+      always.onclick = () => answer(p, { allow: true, always: true }, member);
       row.appendChild(always);
     }
     const deny = el('button', p.choice ? '' : 'danger', p.choice?.deny || 'Deny');
     deny.onclick = () => {
-      if (p.choice) return answer(p, { allow: false });
-      const why = prompt(`Tell ${agentLabel(ui.agent)} what to do instead (optional):`) ?? null;
+      if (p.choice) return answer(p, { allow: false }, member);
+      const why = prompt(`Tell ${agentLabel(member?.agent || ui.agent)} what to do instead (optional):`) ?? null;
       if (why === null) return;
-      answer(p, { allow: false, message: why || undefined });
+      answer(p, { allow: false, message: why || undefined }, member);
     };
     row.appendChild(deny);
     card.appendChild(row);
@@ -1531,7 +1562,7 @@ $('approval-jump').addEventListener('click', () => {
 });
 
 // Answers go back as one list of chosen labels (or typed text) per question.
-function renderQuestion(card, p) {
+function renderQuestion(card, p, member = null) {
   if (p.title) card.appendChild(el('div', 'muted', p.title));
   const answers = p.questions.map(() => []);
   p.questions.forEach((q, qi) => {
@@ -1568,16 +1599,16 @@ function renderQuestion(card, p) {
   });
   const row = el('div', 'row');
   const ok = el('button', 'primary', 'Submit answers');
-  ok.onclick = () => answer(p, { allow: true, answers });
+  ok.onclick = () => answer(p, { allow: true, answers }, member);
   const skip = el('button', 'danger', 'Skip');
-  skip.onclick = () => answer(p, { allow: false, message: 'The user skipped the question.' });
+  skip.onclick = () => answer(p, { allow: false, message: 'The user skipped the question.' }, member);
   row.append(ok, skip);
   card.appendChild(row);
 }
 
-async function answer(p, body) {
+async function answer(p, body, member = null) {
   try {
-    await api('/api/permission', { key: ui.key, id: p.id, ...body });
+    await api('/api/permission', { key: member ? member.key : ui.key, id: p.id, ...body });
   } catch (err) {
     alert(err.message);
   }
@@ -2291,6 +2322,22 @@ $('composer').addEventListener('submit', async (e) => {
       return;
     }
   }
+  if (ui.group || ui.draftAgents.length > 1) {
+    // Several agents at once: one send per member (see sendToGroup).
+    try {
+      await sendToGroup(text, attachments.map(({ mediaType, data }) => ({ mediaType, data })));
+      input.value = '';
+      hideCommandMenu();
+      attachments.length = 0;
+      renderAttachments();
+      autosize();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      $('send').disabled = false;
+    }
+    return;
+  }
   const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
   const isNew = !ui.key;
   const dirs = chatDirs();
@@ -2336,6 +2383,7 @@ $('composer').addEventListener('submit', async (e) => {
 
 // Stopping also clears the queue; its messages come back into the composer.
 $('stop').addEventListener('click', async () => {
+  if (ui.group) return stopGroup();
   try {
     const r = await api('/api/interrupt', { key: ui.key });
     if (r.dropped?.length) restoreToComposer(r.dropped);
@@ -2995,6 +3043,340 @@ $('device-form').addEventListener('submit', (e) => {
 
 // ---------- boot ----------
 
+// ---------- several agents at once ----------
+
+// A group (lib/groups.mjs): one conversation per agent, started from one
+// message in the open workspace, shown as columns (tabs on a phone). Each
+// member keeps its own items and elements, as `ui` does for one
+// conversation; the composer sends to every member, or to the one picked
+// with "Reply to this one". The server picks the mode: Chat in Chat, each
+// agent's read-only mode in a project.
+
+const groupMembers = () => ui.group?.members || [];
+const memberByKey = (key) => groupMembers().find((m) => m.key === key);
+
+// The sidebar lists a group once, as its first row.
+function collapseGroups(list) {
+  const seen = new Set();
+  return list.filter((s) => {
+    if (!s.group) return true;
+    if (seen.has(s.group.id)) return false;
+    seen.add(s.group.id);
+    return true;
+  });
+}
+
+function leaveGroup() {
+  ui.group = null;
+  $('messages').classList.remove('compare');
+}
+
+// The agent picker: the select for one agent, a chip naming several, and
+// Compare… to pick them for a new conversation.
+function renderAgentPicker() {
+  const several = ui.draftAgents.length > 1 && !ui.key && !ui.group;
+  $('agent').classList.toggle('hidden', ui.agents.length < 2 || several || !!ui.group);
+  $('compare').classList.toggle('hidden', ui.agents.length < 2 || !!ui.key || !!ui.group || several);
+  const chip = $('agents-chip');
+  chip.classList.toggle('hidden', !several && !ui.group);
+  const agents = ui.group ? ui.group.agents : ui.draftAgents;
+  chip.textContent = agents.map(agentLabel).join(' + ');
+  chip.title = ui.group ? 'The agents in this conversation' : 'Change which agents to ask';
+  chip.disabled = !!ui.group;
+  document.querySelector('.composer-options').classList.toggle('several', several || !!ui.group);
+}
+
+function chosenAgents() {
+  return [...$('agents-list').querySelectorAll('input:checked')].map((i) => i.value);
+}
+
+function updateAgentsSubmit() {
+  const n = chosenAgents().length;
+  $('agents-submit').textContent = n > 1 ? `Ask ${n} agents` : n === 1 ? `Ask ${agentLabel(chosenAgents()[0])} only` : 'Pick agents';
+  $('agents-submit').disabled = !n;
+}
+
+function openAgentsDialog() {
+  const list = $('agents-list');
+  list.innerHTML = '';
+  const chosen = new Set(ui.draftAgents.length ? ui.draftAgents : [ui.agent]);
+  for (const a of ui.agents) {
+    const row = el('label', 'agent-choice');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.value = a.id;
+    cb.checked = chosen.has(a.id);
+    cb.onchange = updateAgentsSubmit;
+    row.append(cb, el('span', '', a.label));
+    list.appendChild(row);
+  }
+  updateAgentsSubmit();
+  $('agents-dialog').showModal();
+}
+
+$('compare').addEventListener('click', openAgentsDialog);
+$('agents-chip').addEventListener('click', () => {
+  if (!ui.group) openAgentsDialog();
+});
+$('agents-cancel').addEventListener('click', () => $('agents-dialog').close());
+$('agents-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const chosen = chosenAgents();
+  if (!chosen.length) return;
+  $('agents-dialog').close();
+  ui.draftAgents = chosen.length > 1 ? chosen : [];
+  localStorage.setItem('cw_agent', chosen[0]);
+  selectAgent(chosen[0]);
+  renderAgentPicker();
+  renderEmptyState();
+  setRunning(false);
+  $('input').focus();
+});
+
+function makeMember(agent, key, sessionId) {
+  return { agent, key, sessionId, items: new Map(), els: new Map(), dirty: new Set(), raf: 0,
+    running: false, waiting: false, pending: [], queue: [], col: null, head: null, body: null, pendingBox: null, tab: null };
+}
+
+// One column per member, and a tab per member for phones.
+function renderGroupView() {
+  const box = $('messages');
+  box.innerHTML = '';
+  box.classList.add('compare');
+  const tabs = el('div', 'col-tabs');
+  tabs.setAttribute('role', 'tablist');
+  const cols = el('div', 'cols');
+  box.append(tabs, cols);
+  for (const m of groupMembers()) {
+    m.col = el('section', 'col');
+    m.col.setAttribute('aria-label', agentLabel(m.agent));
+    m.head = el('div', 'col-head');
+    m.body = el('div', 'col-body');
+    m.pendingBox = el('div', 'col-pending');
+    m.col.append(m.head, m.body, m.pendingBox);
+    cols.appendChild(m.col);
+    m.tab = el('button', 'col-tab');
+    m.tab.type = 'button';
+    m.tab.setAttribute('role', 'tab');
+    m.tab.onclick = () => activateMember(m);
+    tabs.appendChild(m.tab);
+    renderMemberHead(m);
+    if (!m.key) m.body.appendChild(el('div', 'col-empty', `${agentLabel(m.agent)} never started.`));
+  }
+  activateMember(groupMembers().find((m) => m.agent === ui.group.active) || groupMembers()[0]);
+}
+
+// The column shown on a phone.
+function activateMember(m) {
+  ui.group.active = m.agent;
+  for (const x of groupMembers()) {
+    x.col.classList.toggle('active', x === m);
+    x.tab.classList.toggle('active', x === m);
+    x.tab.setAttribute('aria-selected', String(x === m));
+  }
+}
+
+function renderMemberHead(m) {
+  const h = m.head;
+  h.innerHTML = '';
+  const state = el('span', 'col-state');
+  const dot = (cls) => el('span', 'dot' + (cls ? ' ' + cls : ''));
+  if (m.pending.length) state.append(dot('decision'), `${m.pending.length === 1 ? 'A decision' : `${m.pending.length} decisions`} needed`);
+  else if (m.running) state.append(dot(), m.waiting ? 'Waiting on background work…' : 'Working…');
+  else if (m.queue.length) state.append(`${m.queue.length} queued`);
+  const only = el('button', 'col-only' + (ui.group.target === m.agent ? ' on' : ''), ui.group.target === m.agent ? 'Replying to this one' : 'Reply to this one');
+  only.type = 'button';
+  only.title = ui.group.target === m.agent ? 'Send the next message to every agent again' : `Send the next message to ${agentLabel(m.agent)} only`;
+  only.setAttribute('aria-pressed', String(ui.group.target === m.agent));
+  only.onclick = () => {
+    ui.group.target = ui.group.target === m.agent ? null : m.agent;
+    for (const x of groupMembers()) renderMemberHead(x);
+    setRunning(ui.running);
+    $('input').focus();
+  };
+  h.append(el('span', 'col-name', agentLabel(m.agent)), state, only);
+  if (m.sessionId) {
+    const open = el('a', 'col-open', 'Open');
+    open.href = `#dir=${encodeURIComponent(ui.group.dir)}&a=${m.agent}&s=${encodeURIComponent(m.sessionId)}`;
+    open.title = 'Open this conversation on its own';
+    open.onclick = (e) => {
+      e.preventDefault();
+      openConversation(m.agent, m.sessionId).catch((err) => alert(err.message));
+    };
+    h.appendChild(open);
+  }
+  m.tab.innerHTML = '';
+  m.tab.append(el('span', '', agentLabel(m.agent)));
+  if (m.pending.length) m.tab.appendChild(dot('decision'));
+  else if (m.running) m.tab.appendChild(dot());
+}
+
+// As upsert() and applyDelta(), for one member's column.
+function memberUpsert(m, patch, streaming) {
+  const item = { ...m.items.get(patch.id), ...patch };
+  let old = m.els.get(item.id);
+  if (item.replaces) {
+    const draft = m.els.get(item.replaces);
+    m.els.delete(item.replaces);
+    m.items.delete(item.replaces);
+    m.dirty.delete(item.replaces);
+    if (draft && old) draft.remove();
+    else if (draft) old = draft;
+  }
+  m.items.set(item.id, item);
+  rememberImagePaths(item);
+  const node = renderItem(item, streaming);
+  const stick = m.body.scrollHeight - m.body.scrollTop - m.body.clientHeight < 120;
+  if (old) {
+    const card = (n) => (n.matches('.tool-wrap') ? n.firstChild : n);
+    if (card(old).open) card(node).open = true;
+    old.replaceWith(node);
+  } else {
+    m.body.querySelector('.col-empty')?.remove();
+    m.body.appendChild(node);
+  }
+  m.els.set(item.id, node);
+  if (stick) m.body.scrollTop = m.body.scrollHeight;
+}
+
+function memberDelta(m, id, text) {
+  const item = m.items.get(id) || { id, kind: 'text', text: '' };
+  item.text = (item.text || '') + text;
+  m.items.set(id, item);
+  m.dirty.add(id);
+  m.raf ||= requestAnimationFrame(() => {
+    m.raf = 0;
+    for (const d of m.dirty) if (m.items.has(d)) memberUpsert(m, m.items.get(d), true);
+    m.dirty.clear();
+  });
+}
+
+function applyMemberStatus(m, st) {
+  const was = m.running;
+  m.running = !!st.running;
+  m.waiting = !!st.waiting;
+  m.pending = st.pending || [];
+  m.queue = st.queue || [];
+  renderMemberHead(m);
+  m.pendingBox.innerHTML = '';
+  for (const p of m.pending) m.pendingBox.appendChild(makePendingCard(p, m));
+  // Watching a member finish counts as reading it (see markRead).
+  if (was && !m.running && m.sessionId) api('/api/read', { key: m.key, agent: m.agent, sessionId: m.sessionId, dir: ui.group.dir }).catch(() => {});
+  setRunning(groupMembers().some((x) => x.running));
+}
+
+function handleGroupEvent(ev) {
+  const m = memberByKey(ev.key);
+  if (!m) return;
+  if (ev.type === 'item') memberUpsert(m, ev.item);
+  else if (ev.type === 'delta') memberDelta(m, ev.id, ev.text);
+  else if (ev.type === 'status') applyMemberStatus(m, ev);
+}
+
+// A member's agent reported its session id.
+function groupBound(ev) {
+  const m = ui.group && memberByKey(ev.oldKey);
+  if (!m) return;
+  m.key = ev.key;
+  m.sessionId = ev.sessionId;
+  renderMemberHead(m);
+  writeHash();
+}
+
+async function openGroup(id) {
+  const g = await api('/api/group?id=' + encodeURIComponent(id));
+  if (g.dir !== ui.dir) {
+    setProject(g.dir);
+    await loadSessions();
+  }
+  ui.key = null;
+  ui.sessionId = null;
+  ui.settings = null;
+  ui.ask = false;
+  ui.draftAgents = [];
+  $('just-ask').classList.remove('on');
+  resetView();
+  ui.group = { id, dir: g.dir, agents: g.agents, members: g.members.map((x) => makeMember(x.agent, x.key, x.sessionId)), target: null, active: g.agents[0] };
+  selectAgent(g.agents[0]);
+  renderAgentPicker();
+  renderFolders();
+  $('title').textContent = g.members.find((m) => m.title)?.title || `${g.agents.length} agents`;
+  $('subtitle').textContent = `${subtitleFor()} · ${g.agents.length} agents`;
+  renderGroupView();
+  renderSessions();
+  writeHash();
+  await Promise.all(ui.group.members.map(async (m) => {
+    if (!m.key) return;
+    const data = await api(`/api/sessions/${m.agent}/${encodeURIComponent(m.sessionId || m.key)}?dir=${encodeURIComponent(g.dir)}`);
+    if (ui.group?.id !== id) return;
+    for (const item of data.items) memberUpsert(m, item);
+    if (data.live) {
+      for (const item of data.live.items) memberUpsert(m, item);
+      applyMemberStatus(m, data.live);
+    }
+    m.body.scrollTop = m.body.scrollHeight;
+  }));
+  if (ui.group?.id === id) setRunning(groupMembers().some((m) => m.running));
+}
+
+// Sends to every member, or to the one picked. A new group gets an id here
+// and a temp key per member, so events reach the columns before the
+// replies; the server lists the members as their agents report session
+// ids. Each member uses the model and effort last picked for its agent.
+async function sendToGroup(text, images) {
+  const isNew = !ui.group;
+  if (isNew) {
+    const agents = [...ui.draftAgents];
+    ui.group = { id: randomId(), dir: ui.dir, agents, members: agents.map((a) => makeMember(a, 'new-' + randomId(), null)), target: null, active: agents[0] };
+    ui.draftAgents = [];
+    resetView();
+    renderGroupView();
+    renderAgentPicker();
+    $('title').textContent = text.split('\n')[0].slice(0, 80) || '(image)';
+    $('subtitle').textContent = `${subtitleFor()} · ${agents.length} agents`;
+    writeHash();
+  }
+  const group = ui.group;
+  const targets = group.target ? groupMembers().filter((m) => m.agent === group.target) : groupMembers().filter((m) => m.key);
+  const failed = [];
+  for (const m of targets) {
+    const get = (k) => localStorage.getItem(`cw_${k}:${m.agent}`) || undefined;
+    try {
+      await api('/api/send', { agent: m.agent, sessionId: m.sessionId, key: m.sessionId ? undefined : m.key, dir: group.dir, text, images,
+        model: get('model'), effort: get('effort'), group: group.id });
+      if (!m.running) {
+        m.running = true;
+        renderMemberHead(m);
+      }
+    } catch (err) {
+      failed.push(`${agentLabel(m.agent)}: ${err.message}`);
+      memberUpsert(m, { id: 'fail-' + randomId(), kind: 'notice', text: `Not sent — ${err.message}`, error: true });
+    }
+  }
+  if (isNew) loadSessions();
+  setRunning(groupMembers().some((m) => m.running));
+  if (failed.length && failed.length === targets.length) {
+    if (isNew) {
+      // Nothing started: back to the draft, with the agents still picked.
+      const agents = group.agents;
+      newConversation();
+      ui.draftAgents = agents;
+      renderAgentPicker();
+      renderEmptyState();
+      setRunning(false);
+    }
+    throw new Error(failed.join('\n'));
+  }
+}
+
+// Stops every member's turn; their queued messages come back to the composer.
+async function stopGroup() {
+  const dropped = [];
+  await Promise.all(groupMembers().filter((m) => m.running).map((m) =>
+    api('/api/interrupt', { key: m.key }).then((r) => dropped.push(...(r.dropped || []))).catch(() => {})));
+  if (dropped.length) restoreToComposer(dropped.slice(0, 1));
+}
+
 async function start() {
   const me = await api('/api/me');
   serverSince = me.since;
@@ -3024,7 +3406,8 @@ async function start() {
   startHubPolling();
   startUsageAlerts();
   await loadSessions();
-  if (h.s) await openConversation(h.agent, h.s);
+  if (h.g) await openGroup(h.g).catch(() => newConversation());
+  else if (h.s) await openConversation(h.agent, h.s);
   else {
     newConversation(); // rewrites the hash, so the prompt doesn't come back on reload
     if (h.prompt) {

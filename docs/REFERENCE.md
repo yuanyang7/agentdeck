@@ -375,6 +375,32 @@ each new one starts in Chat mode. A chat opened in a project (after
 **Move…**) keeps Chat mode in its menu until it is switched; projects never
 offer it otherwise.
 
+## Several agents at once
+
+A group (`lib/groups.mjs`) is one conversation per agent, started from one
+message in one folder. Which conversations belong together is kept in
+`~/.agentdeck/groups.json` (`{ groups: { [id]: { dir, agents, members: { agent: sessionId }, createdAt } } }`);
+the conversations themselves are the agents' own sessions, so each one
+also lists, forks, moves and resumes in a terminal like any other. The page
+makes the group id and sends `POST /api/send` once per agent with `group`
+set; the server records each member once its agent reports a session id,
+so an agent that fails before that stays listed without one. `GET
+/api/group?id=` returns the members with the state the sidebar shows, and
+every session in `/api/projects` and `/api/sessions` carries its `group`.
+
+With `group` set, the server picks the mode: Chat mode in the Chat folder,
+otherwise the agent's `readOnlyMode` (Claude Code `plan`, Codex
+`read-only`, opencode `plan`, Gemini `default`), whatever the request
+says. Each member uses the model and effort last picked for its agent in
+that browser. Follow-ups are the same request with the member's
+`sessionId`; a member mid-turn queues it as usual. Gemini takes no images,
+so a message with images reaches it as text only. The compare view is
+`openGroup`, `sendToGroup` and the member functions in `public/app.js`:
+each column keeps its own items and elements and takes the live events for
+its key. A member opened on its own with **Open** is a normal conversation
+and keeps whatever mode it is switched to; the next group message to it
+forces the group's mode again.
+
 ## Extra folders
 
 Besides its own folder, a chat can have up to 10 extra folders that the
@@ -683,6 +709,8 @@ its own, and the prompt leaves the address once the page has read it.
 - `lib/router.mjs`: Just ask, picking the project a task is about.
 - `lib/chat-mode.mjs`: the Chat workspace's folder, the Chat mode and its
   instructions; each agent in `lib/agents/` maps the mode onto its own.
+- `lib/groups.mjs`: which conversations were started together as a group of
+  agents asked the same thing.
 - `lib/folders.mjs`: a chat's extra folders: checking them and spotting
   projects a message names.
 - `lib/commands.mjs`: reading a `/name` message and caching each folder's

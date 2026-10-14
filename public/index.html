@@ -105,6 +105,8 @@
         <div class="composer-row">
           <div class="composer-options">
             <select id="agent" title="Agent (for a new conversation)" aria-label="Agent" class="hidden"></select>
+            <button type="button" id="compare" class="compare-button hidden" aria-haspopup="dialog" title="Ask several agents the same thing">Compare…</button>
+            <button type="button" id="agents-chip" class="agents-chip hidden" aria-haspopup="dialog"></button>
             <select id="mode" title="Mode" aria-label="Mode"></select>
             <select id="model" title="Model" aria-label="Model"></select>
             <select id="effort" title="Effort" aria-label="Effort"></select>
@@ -157,6 +159,18 @@
       <select id="folder-add" aria-label="Add a folder"></select>
       <div class="tag-actions">
         <button type="submit" class="primary">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="agents-dialog" class="tag-dialog">
+    <form method="dialog" id="agents-form">
+      <h2>Ask several agents</h2>
+      <p class="muted folder-hint">Each one answers in its own conversation, shown side by side. Follow-ups go to all of them unless you reply to one. In a project they only read; in Chat they chat.</p>
+      <div id="agents-list" class="folder-list" role="group" aria-label="Agents"></div>
+      <div class="tag-actions">
+        <button type="button" id="agents-cancel">Cancel</button>
+        <button type="submit" class="primary" id="agents-submit">Ask 2 agents</button>
       </div>
     </form>
   </dialog>
