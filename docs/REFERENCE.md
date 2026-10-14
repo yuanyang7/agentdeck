@@ -15,6 +15,7 @@ Detailed configuration and internals for agentdeck. Start with
 | `PROJECT_ROOTS` | `~/code`                    | `:`-separated folders whose subfolders appear as projects.   |
 | `CODEX_BIN`     | newest of `codex` on `PATH` and the copies inside the ChatGPT / Codex apps | Codex binary to start. |
 | `OPENCODE_BIN`  | `opencode` on `PATH`, else `~/.opencode/bin/opencode` | opencode binary to start.            |
+| `AGY_BIN`       | `agy` on `PATH`, else `~/.local/bin/agy` | Antigravity CLI binary to start, for Gemini. |
 | `OPENCODE_URL`  | none                        | Use an already running `opencode serve` instead of starting one (with `OPENCODE_SERVER_PASSWORD` if it has one). |
 | `WORKSPACE_INDEX` | on                        | `off` stops giving agents the [workspace index](#workspace-index). |
 | `ROUTE_MODEL`   | `sonnet`                    | Model that picks the project for [Just ask](#just-ask); any name Claude Code's `--model` accepts. |
@@ -121,10 +122,24 @@ The mode, model and effort menus show what the chosen agent offers:
   configured permissions.
   Models are the ones from opencode's connected providers, and effort lists
   the selected model's variants.
+- **Gemini** (Antigravity CLI): it can't ask before an action when another
+  program drives it, so each mode decides up front. *Read only* lets it read
+  the project but refuses edits and commands; *Edits allowed, no commands*
+  is its `accept-edits` mode; *Plan* is its plan mode; *Full access*
+  approves everything (`--dangerously-skip-permissions`). Anything refused
+  ends the turn with a note naming what was refused. Commands can also be
+  allowed one by one with `permissions.allow` rules in
+  `~/.gemini/antigravity-cli/settings.json` (e.g. `command(git)`). Models
+  are the ones `agy models` lists for your account. There is no effort menu,
+  no **Usage** panel, and messages are text only.
 
 For Codex and opencode the server starts a private `codex app-server` /
 `opencode serve` the first time it is needed and stops it when the server
-exits.
+exits. For Gemini each turn runs `agy` in print mode with JSON events in and
+out (`--input-format stream-json --output-format stream-json`), continuing
+the chat with `--conversation <id>`. The sidebar lists chats from
+`~/.gemini/antigravity-cli/conversation_summaries.db`, and history is read
+from each chat's own database in `conversations/`.
 
 ## Usage limits
 
@@ -156,7 +171,7 @@ result that failed with HTTP 429 or says "You've hit your … limit".
 - Each pause, each move of the time and each continue is logged (the
   server's output, e.g. `/tmp/agentdeck.log` under the LaunchAgent).
 
-Codex and opencode turns that hit a limit end as before.
+Codex, opencode and Gemini turns that hit a limit end as before.
 
 ## Skills
 
@@ -183,6 +198,8 @@ within a minute. A message that starts with `/name` runs it:
   opencode server, which fills its template into the prompt. The message
   shows as typed while the turn runs, but history shows the filled-in
   prompt. A skill is sent as an attachment to the message.
+- **Gemini**: no `/` menu. A message that starts with `/name` goes to
+  Antigravity CLI as typed, which expands its own skills and commands.
 
 ## Tags
 
@@ -204,6 +221,7 @@ sessions and opens in a terminal or desktop app like any other:
   the page says so in the new conversation.
 - **opencode**: `POST /session/{id}/fork` with `before` set to the next
   message, which is opencode's own "copy the history before this message".
+- **Gemini**: not available; Antigravity CLI has no way to copy a chat.
 
 The branch also gets the model, effort, permission mode and tags of the chat
 it came from, which are agentdeck's own records rather than the agent's.
@@ -236,6 +254,7 @@ its own way:
   from `~/.agentdeck/codex-moved.json`.
 - **opencode** moves a session itself: `POST /session/{id}/move` with the new
   directory. The id stays the same.
+- **Gemini** chats can't be moved yet.
 
 After a turn, any folder directly under the project roots made since the
 turn started (other than the chat's own) comes back in the chat's status as
@@ -254,8 +273,8 @@ the projects on this machine, built from what the sidebar knows:
   (at most 60), with its path and the date of its last chat;
 - the first paragraph of its README, or `package.json`'s description,
   clipped to 160 characters;
-- the titles of its three latest chats across Claude Code, Codex and
-  opencode, and up to six subfolders that have chats of their own.
+- the titles of its three latest chats across Claude Code, Codex,
+  opencode and Gemini, and up to six subfolders that have chats of their own.
 
 Chats in a subfolder count toward the top-level project. Worktrees and
 other dot-folders are left out of the subfolder list, and so are folders
@@ -272,6 +291,9 @@ How each agent receives it:
   (`PUT /api/experimental/session/{id}/instructions/entries/workspace-index`).
   opencode v2 does not read the config's `instructions` files. This API is
   experimental; if it fails, the chat goes on without the index.
+- **Gemini**: in front of the chat's first message, between
+  `<agentdeck-context>` tags, since Antigravity CLI takes no extra
+  instructions. agentdeck leaves it out wherever it shows the message.
 
 Each agent records the index when the conversation is created and keeps it
 for the rest of the conversation: Claude Code saves its system prompt with
@@ -355,6 +377,8 @@ gets the folders on every turn:
 - **opencode**: an `external_directory` allow rule for each folder (and its
   resolved path) on the session's permissions. *Ask before actions* still
   asks before edits and shell commands there.
+- **Gemini**: `--add-dir`, which adds them to Antigravity's workspace. The
+  mode still decides what it may do there.
 
 Folders under `/tmp` don't show a difference for Codex: its sandbox lets it
 write to `/tmp` anyway.
@@ -422,7 +446,8 @@ page wakes the sound up. A page that has only ever been scrolled stays silent.
 
 **Stats** in the sidebar footer opens a page of usage charts, built by
 `lib/stats.mjs` from what the agents already keep on disk — nothing new is
-recorded, and chats from terminals and desktop apps count too:
+recorded, and chats from terminals and desktop apps count too. Gemini chats
+aren't counted yet.
 
 - Claude Code: the transcripts in `~/.claude/projects/*/*.jsonl` (or
   `$CLAUDE_CONFIG_DIR/projects`). Prompts are user entries that aren't tool
@@ -637,7 +662,7 @@ its own, and the prompt leaves the address once the page has read it.
 - `lib/stats.mjs`: the Stats page's data, scanned from the agents' own files
   into hour buckets and cached per file; `public/stats.js` renders it.
 - `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,
-  `opencode.mjs`). The interface they implement is described in
+  `opencode.mjs`, `gemini.mjs`). The interface they implement is described in
   `lib/agents/index.mjs`; adding an agent means adding a file there and
   listing it.
 

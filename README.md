@@ -2,8 +2,8 @@
 
 # agentdeck
 
-A small web page for driving coding-agent conversations (Claude Code, Codex
-and opencode) on this machine from any other device on your Tailscale network.
+A small web page for driving coding-agent conversations (Claude Code, Codex,
+opencode and Gemini) on this machine from any other device on your Tailscale network.
 
 Your agents, your code, and the conversation history all stay on the host
 machine — other laptops or phones just open a web page. Every device sees the
@@ -12,10 +12,12 @@ so you can start something on one laptop and approve or continue it from
 another.
 
 Conversations are each agent's own native sessions — Claude Code's in
-`~/.claude/projects`, Codex's in `~/.codex`, opencode's in its own store — so
-anything started in a terminal or desktop app shows up here too, and anything
-started here can be resumed there (`claude --resume`, the Codex app or
-`codex resume`, or the session list in opencode).
+`~/.claude/projects`, Codex's in `~/.codex`, opencode's in its own store,
+Gemini's in Antigravity CLI's `~/.gemini/antigravity-cli` — so anything
+started in a terminal or desktop app shows up here too, and anything started
+here can be resumed there (`claude --resume`, the Codex app or
+`codex resume`, the session list in opencode, or
+`agy --conversation <id>`).
 
 ![A conversation open in agentdeck, showing the sidebar with tagged conversations and a reply with tool calls and an inline image](docs/images/screenshot.png)
 
@@ -27,8 +29,11 @@ npm start
 ```
 
 Requires Node 18+, and Claude Code logged in on the host — agentdeck uses
-that login. Codex and opencode are optional: each one installed on the host
-shows up as another agent, using its own login.
+that login. Codex, opencode and Gemini are optional: each one installed on
+the host shows up as another agent, using its own login. Gemini runs through
+Google's Antigravity CLI (`agy`), which a free Google account can use; sign
+in once by running `agy` in a terminal on the host. (Gemini CLI no longer
+accepts personal Google accounts.)
 
 By default agentdeck listens on this machine's Tailscale IP, port 7878, so
 only devices on your tailnet can reach it. On startup it prints the one
@@ -141,7 +146,7 @@ doesn't reply once the tasks are done, the turn ends; anything still running
 is stopped, and the chat says so with a "Stopped when the turn ended" line. Permission
 prompts (file edits, shell commands, plan approval, questions) appear on
 every connected device, and whichever answers first wins. Avoid keeping the
-same conversation open here and in a terminal, desktop app, or opencode TUI
+same conversation open here and in a terminal, desktop app, opencode TUI or Antigravity CLI
 at the same time — each keeps its own copy in memory and won't see the
 other's messages.
 

@@ -1,5 +1,5 @@
 // agentdeck: a small web UI for driving coding-agent conversations (Claude
-// Code, Codex, opencode) on this machine from other devices on your Tailscale
+// Code, Codex, opencode, Gemini) on this machine from other devices on your Tailscale
 // network.
 //
 // This file is the HTTP layer. Live turns are run by lib/hub.mjs, and each
