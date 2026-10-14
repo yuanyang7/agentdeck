@@ -33,6 +33,7 @@ import { autoResume, setAutoResume } from './lib/resume.mjs';
 import { CHAT_DIR, UPLOADS_DIR, CHAT_MODE } from './lib/chat-mode.mjs';
 import * as groups from './lib/groups.mjs';
 import * as memory from './lib/memory.mjs';
+import * as privates from './lib/private.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STARTED = Date.now(); // pages compare this to tell a restarted server from the old one
@@ -214,7 +215,10 @@ const streams = new Map();
 // its session id is known (lib/groups.mjs).
 const hub = new Hub({
   backend: (id) => backends.get(id),
-  bound: (conv) => conv.group && groups.join(conv.group, conv.dir, conv.agent, conv.sessionId),
+  bound: (conv) => {
+    if (conv.group) groups.join(conv.group, conv.dir, conv.agent, conv.sessionId);
+    if (conv.private) privates.add(conv.agent, conv.sessionId);
+  },
   remember: (text) => memory.remember(memory.notesIn(text)),
   instructions: async (dir) => (sameFolder(dir, CHAT_DIR) ? null : workspaceIndex(listProjects, PROJECT_ROOTS)),
   mentions: (text, dir, dirs) => mentionedFolders(text, rootFolders(PROJECT_ROOTS), dir, dirs),
@@ -416,6 +420,7 @@ async function listProjects() {
     }
     for (const s of r.value) {
       if (!s.dir || !fs.existsSync(s.dir)) continue;
+      if (privates.isPrivate(agents[index].id, s.id)) continue;
       const p = byDir.get(s.dir) || { dir: s.dir, name: path.basename(s.dir), lastModified: 0, sessions: 0, recent: [], attention: [], tagged: [] };
       const agent = agents[index].id;
       const key = `${agent}:${s.id}`;
@@ -431,7 +436,7 @@ async function listProjects() {
     }
   }
   for (const c of hub.live.values()) {
-    if (!c.running || c.sessionId || !byDir.has(c.dir)) continue;
+    if (!c.running || c.sessionId || !byDir.has(c.dir) || c.private) continue;
     const p = byDir.get(c.dir);
     const chat = { agent: c.agent, id: null, key: c.key, dir: c.dir, title: '(starting…)',
       updatedAt: Date.now(), running: true, pendingCount: c.pending.size, unread: false, tags: [], group: startingGroup(c) };
@@ -466,6 +471,7 @@ async function listConversations(dir) {
       console.error(`${b.id} listSessions failed:`, err);
     }
     for (const s of sessions) {
+      if (privates.isPrivate(b.id, s.id)) continue;
       const key = `${b.id}:${s.id}`;
       const live = hub.get(key);
       out.push({ ...s, agent: b.id, key, dir, ...runState(s, live), pendingCount: live?.pending.size || 0, unread: isUnread(b.id, s.id), tags: tagsOf(b.id, s.id), group: groups.groupOf(b.id, s.id) });
@@ -474,6 +480,7 @@ async function listConversations(dir) {
   out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   // Brand-new conversations that haven't reported an id yet.
   for (const c of hub.starting(dir)) {
+    if (c.private) continue;
     out.unshift({ agent: c.agent, id: null, key: c.key, dir, title: '(starting…)', updatedAt: Date.now(), running: true, pendingCount: c.pending.size, tags: [], group: startingGroup(c) });
   }
   return out;
@@ -1013,6 +1020,10 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req, 80_000_000);
       const { agent = 'claude', sessionId, key, dir, text = '', images = [], model, effort, dirs, group } = body;
       let { mode } = body;
+      // A private chat (lib/private.mjs): a new Chat-mode chat in the Chat
+      // folder, with nothing kept. Continuing one keeps it private.
+      const isPrivate = sessionId ? privates.isPrivate(agent, sessionId) : !!body.private && !group && sameFolder(dir, CHAT_DIR);
+      if (isPrivate && !sessionId) mode = CHAT_MODE;
       const backend = await backendFor(agent);
       if (!backend) return send(res, 400, { error: 'Unknown agent' });
       if (typeof text !== 'string') return send(res, 400, { error: 'Bad message' });
@@ -1041,7 +1052,7 @@ const server = http.createServer(async (req, res) => {
       if (folders.error) return send(res, 400, { error: folders.error });
       const settings = { mode: mode || opts.defaultMode, model, effort, dirs: folders.dirs };
       try {
-        return send(res, 200, { key: hub.start(backend, { sessionId, key, dir, text, images, settings, group: group || null }) });
+        return send(res, 200, { key: hub.start(backend, { sessionId, key, dir, text, images, settings, group: group || null, private: isPrivate }) });
       } catch (err) {
         if (err instanceof BusyError) return send(res, 409, { error: err.message });
         throw err;
@@ -1244,6 +1255,18 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { tags, quick: quickTags() });
     }
 
+    if (p === '/api/private/end' && req.method === 'POST') {
+      // The user left a private chat: it goes from the agent's store.
+      const { agent, sessionId, dir } = await readJson(req);
+      const backend = await backendFor(agent);
+      if (!backend || typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) return send(res, 400, { error: 'Bad session' });
+      if (!privates.isPrivate(agent, sessionId)) return send(res, 200, { ok: true });
+      await hub.interrupt(`${agent}:${sessionId}`).catch(() => {});
+      await hub.settled(`${agent}:${sessionId}`);
+      await endPrivate(backend, sessionId, dir);
+      return send(res, 200, { ok: true });
+    }
+
     if (p === '/api/memory') {
       // What chats remember across conversations (lib/memory.mjs).
       if (req.method === 'POST') {
@@ -1276,6 +1299,27 @@ const server = http.createServer(async (req, res) => {
 
 // Chats live here (lib/chat-mode.mjs); agents are started in it.
 fs.mkdirSync(CHAT_DIR, { recursive: true });
+
+// Deletes a private chat from its agent's store and forgets it was one.
+async function endPrivate(backend, sessionId, dir) {
+  try {
+    await backend.delete?.(sessionId, dir);
+  } catch (err) {
+    console.error(`${backend.id} delete ${sessionId} failed:`, err.message);
+  }
+  privates.remove(backend.id, sessionId);
+  hub.live.delete(`${backend.id}:${sessionId}`);
+  hub.broadcast({ type: 'sessions_changed', dir });
+}
+
+// Private chats a closed page left behind go now.
+availableBackends().then(async (list) => {
+  for (const { agent, sessionId } of privates.list()) {
+    const backend = list.find((b) => b.id === agent);
+    if (backend) await endPrivate(backend, sessionId, CHAT_DIR);
+    else privates.remove(agent, sessionId);
+  }
+});
 
 server.listen(PORT, HOST, () => {
   console.log(`agentdeck listening on http://${HOST}:${PORT}`);

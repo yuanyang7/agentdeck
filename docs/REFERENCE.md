@@ -387,6 +387,26 @@ opencode and Gemini record their instructions when a conversation starts,
 so a chat they began earlier doesn't see notes added since; Claude Code
 gets the prompt on every turn.
 
+### Private chats
+
+A private chat (`lib/private.mjs`) is a new Chat-mode chat in the Chat
+folder sent with `private: true`. Its prompt leaves the memory out and
+says a private chat keeps nothing, and the hub saves no notes from it.
+Agents always write their sessions to disk, so the chat exists in the
+agent's store while it is open; `~/.agentdeck/private.json` lists those
+sessions, the sidebar and `/api/sessions` leave them out, and the page
+never puts one in the URL. When the page leaves the chat (another
+conversation, **New conversation**, **End private chat**, or closing the
+page, which sends a beacon) it posts `/api/private/end`, and the server
+stops any running turn and calls the agent's `delete`: Claude Code's
+transcript and its folder of subagent transcripts are removed; Codex's
+thread is archived and its rollout file removed (Codex's index keeps the
+archived entry); opencode's session is deleted through its API; Gemini's
+conversation database and summary row are removed. At startup agentdeck
+deletes any private session still listed, which a closed page left
+behind. A private chat can't be moved or forked. Compare (several agents)
+isn't private.
+
 The mode is stored with the chat like any other, so every device continues
 it the same way. In the Chat workspace, the mode picked for a new
 conversation isn't remembered across chats the way model and effort are:
@@ -733,6 +753,8 @@ its own, and the prompt leaves the address once the page has read it.
   agents asked the same thing.
 - `lib/memory.mjs`: what chats remember across conversations, and reading
   the notes out of a reply.
+- `lib/private.mjs`: which open chats are private, so they stay unlisted
+  and get deleted when left.
 - `lib/folders.mjs`: a chat's extra folders: checking them and spotting
   projects a message names.
 - `lib/commands.mjs`: reading a `/name` message and caching each folder's
