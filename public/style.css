@@ -449,6 +449,15 @@ body.stats-open { overflow: hidden; }
 .tip-value { font-weight: 650; font-variant-numeric: tabular-nums; }
 .tip-label { color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Memory: what chats remember across conversations. */
+.memory-dialog form { width: min(100%, 560px); }
+#memory-text { width: 100%; min-height: 200px; resize: vertical; padding: 10px 12px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px; }
+.memory-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; }
+.memory-foot button { min-height: 30px; padding: 4px 10px; font-size: 12px; }
+.remembered { display: inline-flex; align-items: baseline; gap: 8px; max-width: 100%; margin: 6px 0; padding: 6px 11px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--user) 55%, transparent); font-size: 13px; }
+.remembered-kicker { flex: none; color: var(--accent); font-size: 10px; font-weight: 750; letter-spacing: .1em; }
+.remembered-notes { white-space: pre-wrap; word-break: break-word; }
+
 /* Several agents asked the same thing: one column each, tabs on a phone. */
 .compare-button, .agents-chip { flex: none; min-height: 34px; padding: 5px 10px; border: 1px solid transparent; background: var(--code-bg); color: var(--text); border-radius: 8px; font-size: 11px; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .compare-button:hover, .agents-chip:hover:not(:disabled) { border-color: var(--border); }

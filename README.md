@@ -225,6 +225,13 @@ offered in Chat; a project chat never starts in it. See
 [docs/REFERENCE.md](docs/REFERENCE.md#chat) for what each agent does with
 it.
 
+Chats also remember across conversations. Tell one "remember that…" and
+it keeps a note; every new chat, with any agent, starts knowing all the
+notes, so what you told Claude, Gemini knows too. A reply that keeps a note
+shows it as **Remembered**. **Memory** in the composer opens the notes to
+edit or clear; they live in one file, `~/.agentdeck/chat/MEMORY.md`.
+Project conversations don't use it.
+
 ### Several agents at once
 
 **Compare…** beside the agent picker asks several agents the same thing:

@@ -32,6 +32,7 @@ import { collect as collectStats } from './lib/stats.mjs';
 import { autoResume, setAutoResume } from './lib/resume.mjs';
 import { CHAT_DIR, UPLOADS_DIR, CHAT_MODE } from './lib/chat-mode.mjs';
 import * as groups from './lib/groups.mjs';
+import * as memory from './lib/memory.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STARTED = Date.now(); // pages compare this to tell a restarted server from the old one
@@ -214,6 +215,7 @@ const streams = new Map();
 const hub = new Hub({
   backend: (id) => backends.get(id),
   bound: (conv) => conv.group && groups.join(conv.group, conv.dir, conv.agent, conv.sessionId),
+  remember: (text) => memory.remember(memory.notesIn(text)),
   instructions: async (dir) => (sameFolder(dir, CHAT_DIR) ? null : workspaceIndex(listProjects, PROJECT_ROOTS)),
   mentions: (text, dir, dirs) => mentionedFolders(text, rootFolders(PROJECT_ROOTS), dir, dirs),
   created: (dir, since) => newProjects(dir, since),
@@ -1240,6 +1242,20 @@ const server = http.createServer(async (req, res) => {
       const tags = setTags(agent, sessionId, list);
       hub.broadcast({ type: 'sessions_changed', dir });
       return send(res, 200, { tags, quick: quickTags() });
+    }
+
+    if (p === '/api/memory') {
+      // What chats remember across conversations (lib/memory.mjs).
+      if (req.method === 'POST') {
+        const { text } = await readJson(req, 200_000);
+        try {
+          memory.write(text);
+        } catch (err) {
+          return send(res, 400, { error: err.message });
+        }
+        hub.broadcast({ type: 'memory_changed' });
+      }
+      return send(res, 200, { text: memory.read(), max: memory.MAX_MEMORY, file: memory.MEMORY_FILE });
     }
 
     if (p === '/api/quicktags') {
