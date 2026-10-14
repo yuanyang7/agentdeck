@@ -30,7 +30,8 @@ import { routeTask, MODEL as ROUTE_MODEL } from './lib/router.mjs';
 import * as feedbackloop from './lib/feedbackloop.mjs';
 import { collect as collectStats } from './lib/stats.mjs';
 import { autoResume, setAutoResume } from './lib/resume.mjs';
-import { CHAT_DIR, UPLOADS_DIR } from './lib/chat-mode.mjs';
+import { CHAT_DIR, UPLOADS_DIR, CHAT_MODE } from './lib/chat-mode.mjs';
+import * as groups from './lib/groups.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STARTED = Date.now(); // pages compare this to tell a restarted server from the old one
@@ -208,8 +209,11 @@ const streams = new Map();
 // a message naming one of them offers it as an extra folder (lib/folders.mjs),
 // and a project made during a turn is offered as a place to move the chat.
 // A chat paused at a plan limit continues with its own agent once it resets.
+// A conversation started as one of a group of agents is listed in it once
+// its session id is known (lib/groups.mjs).
 const hub = new Hub({
   backend: (id) => backends.get(id),
+  bound: (conv) => conv.group && groups.join(conv.group, conv.dir, conv.agent, conv.sessionId),
   instructions: async (dir) => (sameFolder(dir, CHAT_DIR) ? null : workspaceIndex(listProjects, PROJECT_ROOTS)),
   mentions: (text, dir, dirs) => mentionedFolders(text, rootFolders(PROJECT_ROOTS), dir, dirs),
   created: (dir, since) => newProjects(dir, since),
@@ -415,7 +419,7 @@ async function listProjects() {
       const key = `${agent}:${s.id}`;
       const live = hub.get(key);
       const chat = { ...s, agent, key, dir: s.dir, ...runState(s, live),
-        pendingCount: live?.pending.size || 0, unread: isUnread(agent, s.id), tags: tagsOf(agent, s.id) };
+        pendingCount: live?.pending.size || 0, unread: isUnread(agent, s.id), tags: tagsOf(agent, s.id), group: groups.groupOf(agent, s.id) };
       p.sessions += 1;
       p.lastModified = Math.max(p.lastModified, s.updatedAt || 0);
       p.recent.push(chat);
@@ -428,7 +432,7 @@ async function listProjects() {
     if (!c.running || c.sessionId || !byDir.has(c.dir)) continue;
     const p = byDir.get(c.dir);
     const chat = { agent: c.agent, id: null, key: c.key, dir: c.dir, title: '(starting…)',
-      updatedAt: Date.now(), running: true, pendingCount: c.pending.size, unread: false, tags: [] };
+      updatedAt: Date.now(), running: true, pendingCount: c.pending.size, unread: false, tags: [], group: startingGroup(c) };
     p.recent.push(chat);
     p.attention.push(chat);
     p.lastModified = Math.max(p.lastModified, chat.updatedAt);
@@ -439,6 +443,14 @@ async function listProjects() {
     p.recent = p.recent.slice(0, 3);
   }
   return [...byDir.values()].sort((a, b) => (b.chat || 0) - (a.chat || 0) || b.lastModified - a.lastModified || a.name.localeCompare(b.name));
+}
+
+// The group of a conversation whose agent hasn't reported a session id yet,
+// as the sidebar shows it: { id, agents }, or null.
+function startingGroup(c) {
+  if (!c.group) return null;
+  const g = groups.group(c.group);
+  return { id: c.group, agents: g?.agents.includes(c.agent) ? g.agents : [...(g?.agents || []), c.agent] };
 }
 
 // Every agent's conversations in one folder, newest first.
@@ -454,13 +466,13 @@ async function listConversations(dir) {
     for (const s of sessions) {
       const key = `${b.id}:${s.id}`;
       const live = hub.get(key);
-      out.push({ ...s, agent: b.id, key, dir, ...runState(s, live), pendingCount: live?.pending.size || 0, unread: isUnread(b.id, s.id), tags: tagsOf(b.id, s.id) });
+      out.push({ ...s, agent: b.id, key, dir, ...runState(s, live), pendingCount: live?.pending.size || 0, unread: isUnread(b.id, s.id), tags: tagsOf(b.id, s.id), group: groups.groupOf(b.id, s.id) });
     }
   }
   out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   // Brand-new conversations that haven't reported an id yet.
   for (const c of hub.starting(dir)) {
-    out.unshift({ agent: c.agent, id: null, key: c.key, dir, title: '(starting…)', updatedAt: Date.now(), running: true, pendingCount: c.pending.size, tags: [] });
+    out.unshift({ agent: c.agent, id: null, key: c.key, dir, title: '(starting…)', updatedAt: Date.now(), running: true, pendingCount: c.pending.size, tags: [], group: startingGroup(c) });
   }
   return out;
 }
@@ -979,8 +991,26 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (p === '/api/group' && req.method === 'GET') {
+      // The conversations of a group of agents asked the same thing, with
+      // each one's state as the sidebar shows it (lib/groups.mjs).
+      const id = url.searchParams.get('id') || '';
+      const g = groups.GROUP_ID.test(id) && groups.group(id);
+      if (!g) return send(res, 404, { error: 'No such group' });
+      const chats = await listConversations(g.dir);
+      const members = g.agents.map((agent) => {
+        const sessionId = g.members[agent] || null;
+        const chat = chats.find((c) => c.agent === agent && (sessionId ? c.id === sessionId : !c.id && c.group?.id === id));
+        return { agent, sessionId, key: chat?.key || (sessionId ? `${agent}:${sessionId}` : null),
+          ...(chat && { title: chat.title, running: chat.running, pendingCount: chat.pendingCount, unread: chat.unread, updatedAt: chat.updatedAt }) };
+      });
+      return send(res, 200, { id, dir: g.dir, agents: g.agents, members });
+    }
+
     if (p === '/api/send' && req.method === 'POST') {
-      const { agent = 'claude', sessionId, key, dir, text = '', images = [], mode, model, effort, dirs } = await readJson(req, 80_000_000);
+      const body = await readJson(req, 80_000_000);
+      const { agent = 'claude', sessionId, key, dir, text = '', images = [], model, effort, dirs, group } = body;
+      let { mode } = body;
       const backend = await backendFor(agent);
       if (!backend) return send(res, 400, { error: 'Unknown agent' });
       if (typeof text !== 'string') return send(res, 400, { error: 'Bad message' });
@@ -994,6 +1024,11 @@ const server = http.createServer(async (req, res) => {
       if (key != null && (typeof key !== 'string' || !/^new-[\w-]{1,64}$/.test(key))) return send(res, 400, { error: 'Bad key' });
       // Sent while a turn runs, the message waits in the chat's queue.
       const opts = await backend.options();
+      if (group != null && (typeof group !== 'string' || !groups.GROUP_ID.test(group))) return send(res, 400, { error: 'Bad group' });
+      // One of several agents asked the same thing (lib/groups.mjs): in Chat
+      // it chats; in a project it reads but doesn't edit, so the members
+      // can't trip over each other's changes.
+      if (group) mode = sameFolder(dir, CHAT_DIR) ? CHAT_MODE : opts.readOnlyMode || opts.defaultMode;
       if (!opts.modes.some((x) => x.value === (mode || opts.defaultMode))) return send(res, 400, { error: 'Bad mode' });
       if (!validName(model) || !validName(effort)) return send(res, 400, { error: 'Bad model or effort' });
       if (typeof dir !== 'string' || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
@@ -1004,7 +1039,7 @@ const server = http.createServer(async (req, res) => {
       if (folders.error) return send(res, 400, { error: folders.error });
       const settings = { mode: mode || opts.defaultMode, model, effort, dirs: folders.dirs };
       try {
-        return send(res, 200, { key: hub.start(backend, { sessionId, key, dir, text, images, settings }) });
+        return send(res, 200, { key: hub.start(backend, { sessionId, key, dir, text, images, settings, group: group || null }) });
       } catch (err) {
         if (err instanceof BusyError) return send(res, 409, { error: err.message });
         throw err;

@@ -225,6 +225,21 @@ offered in Chat; a project chat never starts in it. See
 [docs/REFERENCE.md](docs/REFERENCE.md#chat) for what each agent does with
 it.
 
+### Several agents at once
+
+**Compare…** beside the agent picker asks several agents the same thing:
+tick the agents, send one message, and each answers in its own
+conversation, shown side by side (tabs on a phone). Follow-ups go to all
+of them, or to one column after **Reply to this one**; **Stop** stops them
+all, and permission prompts appear in the column they belong to. In
+[Chat](#chat) they chat; in a project each runs in its read-only mode
+(Claude Code's Plan mode, Read only for Codex and Gemini, opencode's `plan`
+agent), so they can't trip over each other's changes. The sidebar lists the
+group as one row with every agent's badge, and the link restores all the
+columns. Each conversation is still the agent's own session: **Open** in a
+column shows it on its own, where it can be continued in any mode, forked
+or moved. See [docs/REFERENCE.md](docs/REFERENCE.md#several-agents-at-once).
+
 ### Folders
 
 A chat works in its project folder, and can work in other folders too. The
