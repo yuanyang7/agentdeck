@@ -320,6 +320,8 @@ function runCommand(command, cwd) {
 }
 
 const runningTurns = () => [...hub.live.values()].filter((c) => c.running).length;
+// New chats waiting for another chat to finish (lib/hub.mjs); a restart loses them.
+const waitingChats = () => hub.starting().filter((c) => !c.running).length;
 
 // ---------- project bar (Tool Hub) ----------
 
@@ -436,11 +438,10 @@ async function listProjects() {
       byDir.set(s.dir, p);
     }
   }
-  for (const c of hub.live.values()) {
-    if (!c.running || c.sessionId || !byDir.has(c.dir) || c.private) continue;
+  for (const c of hub.starting()) {
+    if (!byDir.has(c.dir) || c.private) continue;
     const p = byDir.get(c.dir);
-    const chat = { agent: c.agent, id: null, key: c.key, dir: c.dir, title: '(starting…)',
-      updatedAt: Date.now(), running: true, pendingCount: c.pending.size, unread: false, tags: [], group: startingGroup(c) };
+    const chat = startingChat(c);
     p.recent.push(chat);
     p.attention.push(chat);
     p.lastModified = Math.max(p.lastModified, chat.updatedAt);
@@ -451,6 +452,21 @@ async function listProjects() {
     p.recent = p.recent.slice(0, 3);
   }
   return [...byDir.values()].sort((a, b) => (b.chat || 0) - (a.chat || 0) || b.lastModified - a.lastModified || a.name.localeCompare(b.name));
+}
+
+// A conversation whose agent hasn't reported a session id yet, as the
+// sidebar lists it: starting, or waiting for another chat (`waitingFor`, its
+// title) before it starts.
+function startingChat(c) {
+  return { agent: c.agent, id: null, key: c.key, dir: c.dir, title: c.running ? '(starting…)' : c.title, updatedAt: Date.now(),
+    running: c.running, waitingFor: c.running ? null : c.afterTitle || 'another chat', pendingCount: c.pending.size, unread: false, tags: [], group: startingGroup(c) };
+}
+
+// The title of a chat agentdeck runs, as the sidebar lists it.
+async function liveTitle(conv) {
+  if (!conv.sessionId) return conv.title;
+  const chats = await listConversations(conv.dir).catch(() => []);
+  return chats.find((c) => c.key === conv.key)?.title || 'Untitled';
 }
 
 // The group of a conversation whose agent hasn't reported a session id yet,
@@ -480,10 +496,7 @@ async function listConversations(dir) {
   }
   out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   // Brand-new conversations that haven't reported an id yet.
-  for (const c of hub.starting(dir)) {
-    if (c.private) continue;
-    out.unshift({ agent: c.agent, id: null, key: c.key, dir, title: '(starting…)', updatedAt: Date.now(), running: true, pendingCount: c.pending.size, tags: [], group: startingGroup(c) });
-  }
+  for (const c of hub.starting(dir)) if (!c.private) out.unshift(startingChat(c));
   return out;
 }
 
@@ -771,9 +784,11 @@ const server = http.createServer(async (req, res) => {
       if (!action) return send(res, 404, { error: 'No such action.' });
       const busy = () => {
         const n = runningTurns();
-        return n ? `${n} conversation${n === 1 ? ' is' : 's are'} mid-turn and would be stopped.` : '';
+        const w = waitingChats();
+        return [n && `${n} conversation${n === 1 ? ' is' : 's are'} mid-turn and would be stopped.`,
+          w && `${w} new chat${w === 1 ? ' is' : 's are'} waiting for another chat to finish and would be lost.`].filter(Boolean).join(' ');
       };
-      if (action.restart && !force && busy()) return send(res, 409, { error: busy(), running: runningTurns() });
+      if (action.restart && !force && busy()) return send(res, 409, { error: busy(), running: runningTurns(), waiting: waitingChats() });
       let result = { code: 0, output: '', timedOut: false, ms: 0 };
       if (action.command) {
         if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.existsSync(dir)) return send(res, 400, { error: 'Project folder not found' });
@@ -1050,7 +1065,7 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/send' && req.method === 'POST') {
       const body = await readJson(req, 80_000_000);
-      const { agent = 'claude', sessionId, key, dir, text = '', images = [], model, effort, dirs, group } = body;
+      const { agent = 'claude', sessionId, key, dir, text = '', images = [], model, effort, dirs, group, after } = body;
       let { mode } = body;
       // A private chat (lib/private.mjs): a new Chat-mode chat in the Chat
       // folder, with nothing kept. Continuing one keeps it private.
@@ -1083,8 +1098,13 @@ const server = http.createServer(async (req, res) => {
       const folders = checkFolders(dirs === undefined && sessionId ? settingsOf(agent, sessionId)?.dirs : dirs, dir);
       if (folders.error) return send(res, 400, { error: folders.error });
       const settings = { mode: mode || opts.defaultMode, model, effort, dirs: folders.dirs };
+      // A new chat can wait for another chat to finish (lib/hub.mjs).
+      if (after != null && (typeof after !== 'string' || after.length > 200 || sessionId || group || isPrivate)) return send(res, 400, { error: 'Only a new chat can wait for another one.' });
+      const target = after ? hub.get(after) : null;
+      const afterTitle = target ? await liveTitle(target) : null;
       try {
-        return send(res, 200, { key: hub.start(backend, { sessionId, key, dir, text, images, settings, group: group || null, private: isPrivate }) });
+        const started = hub.start(backend, { sessionId, key, dir, text, images, settings, group: group || null, private: isPrivate, after, afterTitle });
+        return send(res, 200, { key: started, waiting: !!hub.get(started)?.after });
       } catch (err) {
         if (err instanceof BusyError) return send(res, 409, { error: err.message });
         throw err;
@@ -1133,6 +1153,30 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { ok: true, dropped: dropped.map(({ text, images }) => ({ text, images })) });
       }
       if (!(await hub.resume(conv, { check: false }))) return send(res, 409, { error: 'This chat is already working.' });
+      return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/working' && req.method === 'GET') {
+      // The chats a new one can wait for: working now, paused at a plan
+      // limit, or waiting themselves (lib/hub.mjs).
+      const chats = await Promise.all(hub.working().map(async (c) => ({
+        key: c.key, agent: c.agent, dir: c.dir, title: await liveTitle(c),
+        state: c.running ? 'running' : c.resume ? 'paused' : 'waiting', resumeAt: c.resume?.at || null, waitingFor: c.after ? c.afterTitle : null,
+      })));
+      return send(res, 200, { chats });
+    }
+
+    if (p === '/api/after' && req.method === 'POST') {
+      // A new chat waiting for another one: `cancel` drops it (its messages
+      // come back for the composer), otherwise it starts now.
+      const { key, cancel } = await readJson(req);
+      const conv = typeof key === 'string' ? hub.get(key) : null;
+      if (!conv?.after) return send(res, 404, { error: 'This chat is no longer waiting.' });
+      if (cancel) {
+        const dropped = hub.cancelAfter(key) || [];
+        return send(res, 200, { ok: true, dropped: dropped.map(({ text, images }) => ({ text, images })) });
+      }
+      hub.release(conv);
       return send(res, 200, { ok: true });
     }
 
@@ -1247,7 +1291,7 @@ const server = http.createServer(async (req, res) => {
       if (id !== sessionId) {
         const tags = tagsOf(agent, sessionId);
         if (tags.length) setTags(agent, id, tags);
-        if (conv) hub.live.delete(conv.key);
+        if (conv) hub.forget(conv.key);
       } else if (conv) {
         conv.dir = target;
         conv.created = [];
@@ -1344,7 +1388,7 @@ async function endPrivate(backend, sessionId, dir) {
   forgetSettings(backend.id, sessionId);
   setTags(backend.id, sessionId, []);
   markRead(backend.id, sessionId);
-  hub.live.delete(`${backend.id}:${sessionId}`);
+  hub.forget(`${backend.id}:${sessionId}`);
   hub.broadcast({ type: 'sessions_changed', dir });
 }
 

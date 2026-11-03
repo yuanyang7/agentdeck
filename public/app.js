@@ -22,6 +22,8 @@ const ui = {
   queue: [], // messages waiting for the running turn: [{ id, text, images (count) }]
   tasks: [], // the running turn's background tasks: [{ id, type, description }]
   resume: null, // the chat hit a plan limit and continues by itself: { at, label }
+  after: null, // the open chat waits for another one to finish: { key, title }
+  afterPick: null, // the chat a new one will wait for, picked before its first message: { key, title }
   sessions: [],
   projects: [],
   expandedWorkspace: null,
@@ -398,9 +400,11 @@ function renderSessions() {
     const running = p.attention.filter((s) => s.running && !s.pendingCount).length;
     const unread = p.attention.filter((s) => s.unread && !s.pendingCount && !s.running).length;
     const paused = p.attention.filter((s) => s.resumeAt && !s.pendingCount && !s.running).length;
+    const waiting = p.attention.filter((s) => s.waitingFor).length;
     if (pending) counts.push(`${pending} decision${pending === 1 ? '' : 's'}`);
     if (running) counts.push(`${running} working`);
     if (paused) counts.push(`${paused} at a limit`);
+    if (waiting) counts.push(`${waiting} waiting`);
     if (unread) counts.push(`${unread} unread`);
     const detail = el('span', 'workspace-detail', counts.join(' · ') || `${p.sessions} conversation${p.sessions === 1 ? '' : 's'}`);
     head.append(name, detail);
@@ -468,6 +472,10 @@ function sessionRow(s, showWorkspace = false) {
       const d = el('span', 'dot paused');
       d.title = `Hit a usage limit; continues ${resumeTime(s.resumeAt)}`;
       t.appendChild(d);
+    } else if (s.waitingFor) {
+      const d = el('span', 'dot waiting');
+      d.title = `Starts once “${s.waitingFor}” finishes`;
+      t.appendChild(d);
     } else if (s.unread && (s.key !== ui.key || s.dir !== ui.dir)) {
       // A turn finished here that this browser hasn't seen; opening the chat
       // counts as reading it. The open chat itself is never "unread".
@@ -482,7 +490,7 @@ function sessionRow(s, showWorkspace = false) {
     // A group of agents asked the same thing is one row with every agent's badge.
     for (const a of s.group ? s.group.agents : ui.agents.length > 1 ? [s.agent] : []) meta.appendChild(el('span', 'agent-badge', agentLabel(a)));
     meta.appendChild(document.createTextNode([showWorkspace && ui.projects.find((p) => p.dir === s.dir)?.name,
-      s.pendingCount ? 'Needs decision' : s.elsewhere ? 'Working in another app' : s.running ? 'Working' : s.resumeAt ? `Continues ${resumeTime(s.resumeAt)}` : s.unread ? 'Finished · unread' : s.stopped ? 'Stopped mid-turn' : null,
+      s.pendingCount ? 'Needs decision' : s.elsewhere ? 'Working in another app' : s.running ? 'Working' : s.resumeAt ? `Continues ${resumeTime(s.resumeAt)}` : s.waitingFor ? `Waits for “${s.waitingFor}”` : s.unread ? 'Finished · unread' : s.stopped ? 'Stopped mid-turn' : null,
       timeAgo(s.updatedAt), s.branch].filter(Boolean).join(' · ')));
     li.append(t, meta);
     if (s.tags?.length) {
@@ -614,12 +622,14 @@ function resetView() {
   ui.queue = [];
   ui.tasks = [];
   ui.resume = null;
+  ui.after = null;
   clearTimeout(pendingAnnouncementTimer);
   $('announcement').textContent = '';
   renderPending();
   renderQueue();
   renderTasks();
   renderResume();
+  renderWaiting();
 }
 
 // With `ask`, the chat has no workspace yet: the first message is routed to
@@ -632,6 +642,7 @@ function newConversation(ask = false) {
   ui.draftDirs = [];
   ui.draftAgents = [];
   ui.private = false;
+  ui.afterPick = null;
   ui.ask = !!ask;
   leaveGroup();
   $('just-ask').classList.toggle('on', ui.ask);
@@ -695,6 +706,7 @@ async function openConversation(agent, id) {
   ui.settings = null;
   ui.ask = false;
   ui.draftAgents = [];
+  ui.afterPick = null;
   leaveGroup();
   $('just-ask').classList.remove('on');
   renderFolders();
@@ -1266,9 +1278,11 @@ function applyStatus(st) {
   ui.tasks = st.tasks || [];
   renderTasks();
   ui.resume = st.resume || null;
+  ui.after = st.after || null;
   ui.waiting = !!st.waiting;
   setRunning(st.running);
   renderResume();
+  renderWaiting();
   ui.mode = st.mode || null;
   if (st.mode && [...$('mode').options].some((o) => o.value === st.mode)) $('mode').value = st.mode;
   renderPending();
@@ -1298,13 +1312,14 @@ function setRunning(running) {
   if (!running) ui.waiting = false;
   // While a turn runs, sending queues the message for after it; once its
   // reply is done and only background tasks run, a message goes in now. A
-  // chat paused at a plan limit queues it for when the limit resets.
-  const paused = !running && !!ui.resume;
+  // chat paused at a plan limit queues it for when the limit resets, and one
+  // waiting for another chat for when that one finishes.
+  const paused = !running && (!!ui.resume || !!ui.after);
   const queues = (running && !ui.waiting) || paused;
   $('stop').classList.toggle('hidden', !running);
   $('stop').title = ui.waiting ? 'Stop the background tasks and end the turn' : '';
   $('send').firstChild.textContent = queues ? 'Queue ' : 'Send ';
-  $('send').title = paused ? 'Runs when the limit resets' : queues ? 'Runs after the current turn finishes' : '';
+  $('send').title = !running && ui.after ? 'Runs after the first message, once the other chat finishes' : paused ? 'Runs when the limit resets' : queues ? 'Runs after the current turn finishes' : '';
   $('input').placeholder = composerPlaceholder(running, queues);
   $('status').classList.remove('status-error');
   $('status').removeAttribute('role');
@@ -1652,7 +1667,7 @@ function renderQueue() {
     if (m.images) row.appendChild(el('span', 'queued-images', `+${m.images} image${m.images === 1 ? '' : 's'}`));
     const now = el('button', '', 'Send now');
     now.type = 'button';
-    now.title = 'Stop the current turn and run this message next';
+    now.title = ui.after && !ui.running ? 'Start this chat now instead of waiting' : 'Stop the current turn and run this message next';
     now.onclick = () => api('/api/send-now', { key: ui.key, id: m.id }).catch((err) => alert(err.message));
     const edit = el('button', '', 'Edit');
     edit.type = 'button';
@@ -1735,6 +1750,127 @@ function renderResume() {
   box.appendChild(row);
 }
 
+// ---------- run after another chat ----------
+
+// A new chat can wait for one that is working: its first message is kept on
+// the host and starts by itself once that chat stops working (lib/hub.mjs),
+// so tasks that would edit the same files run one after the other. Not for
+// several agents at once, Just ask, or a private chat.
+const canWait = () => !ui.key && !ui.group && ui.draftAgents.length <= 1 && !ui.ask && !(ui.private && inChat());
+
+function renderAfterPick() {
+  const b = $('after');
+  const pick = ui.afterPick;
+  b.classList.toggle('hidden', !canWait());
+  b.classList.toggle('on', !!pick);
+  b.textContent = pick ? `After: ${pick.title}` : 'Run after…';
+  b.title = pick ? `Starts once “${pick.title}” finishes` : 'Start this chat once another chat finishes';
+}
+
+// "Claude · agentdeck · Working"
+function workingMeta(c) {
+  const state = c.state === 'paused' ? `At a usage limit, continues ${resumeTime(c.resumeAt)}`
+    : c.state === 'waiting' ? `Waits for “${c.waitingFor || 'another chat'}”` : 'Working';
+  return [ui.agents.length > 1 && agentLabel(c.agent), ui.projects.find((p) => p.dir === c.dir)?.name || folderName(c.dir), state].filter(Boolean).join(' · ');
+}
+
+function afterOption(value, title, meta) {
+  const label = el('label', 'after-option');
+  const radio = document.createElement('input');
+  radio.type = 'radio';
+  radio.name = 'after';
+  radio.value = value;
+  radio.checked = (ui.afterPick?.key || '') === value;
+  radio.dataset.title = title;
+  label.append(radio, el('span', 'after-title', title), el('span', 'muted after-meta', meta));
+  return label;
+}
+
+async function openAfterPicker() {
+  const list = $('after-list');
+  $('after-error').textContent = '';
+  list.innerHTML = '';
+  list.appendChild(el('span', 'muted', 'Looking for working chats…'));
+  $('after-dialog').showModal();
+  let chats = [];
+  try {
+    ({ chats } = await api('/api/working'));
+  } catch (err) {
+    $('after-error').textContent = `Couldn’t list the working chats: ${err.message}`;
+  }
+  // This workspace's chats first.
+  chats.sort((a, b) => (b.dir === ui.dir) - (a.dir === ui.dir));
+  list.innerHTML = '';
+  list.appendChild(afterOption('', 'Start right away', chats.length ? 'Don’t wait for another chat' : 'No other chat is working right now'));
+  for (const c of chats) list.appendChild(afterOption(c.key, c.title || 'Untitled', workingMeta(c)));
+  // The picked chat finished meanwhile: nothing to wait for any more.
+  if (!list.querySelector('input:checked')) list.querySelector('input').checked = true;
+  list.querySelector('input:checked').focus();
+}
+
+$('after').addEventListener('click', openAfterPicker);
+$('after-cancel').addEventListener('click', () => $('after-dialog').close());
+$('after-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const picked = $('after-list').querySelector('input:checked');
+  ui.afterPick = picked?.value ? { key: picked.value, title: picked.dataset.title } : null;
+  renderAfterPick();
+  $('after-dialog').close();
+});
+
+// The open chat waits for another one: start it now, or cancel it, which
+// puts its messages back into the composer of a new chat that still waits.
+function renderWaiting() {
+  const box = $('waiting-for');
+  box.innerHTML = '';
+  if (!ui.after || ui.running) return;
+  const row = el('div', 'queued resume-row waiting-row');
+  row.appendChild(el('span', 'task-type', 'Waiting'));
+  row.appendChild(el('div', 'queued-text', `Starts by itself once “${ui.after.title || 'the other chat'}” finishes.`));
+  const now = el('button', '', 'Start now');
+  now.type = 'button';
+  now.title = 'Don’t wait; start this chat now';
+  const cancel = el('button', '', 'Cancel');
+  cancel.type = 'button';
+  cancel.title = 'Don’t run it; its messages go back to the message box';
+  const act = async (b, body) => {
+    const after = ui.after;
+    now.disabled = cancel.disabled = true;
+    b.textContent += '…';
+    try {
+      const r = await api('/api/after', { key: ui.key, ...body });
+      if (body.cancel) {
+        backToDraft(after);
+        restoreToComposer(r.dropped || []);
+      }
+    } catch (err) {
+      alert(err.message);
+      renderWaiting();
+    }
+  };
+  now.onclick = () => act(now, {});
+  cancel.onclick = () => act(cancel, { cancel: true });
+  row.append(now, cancel);
+  box.appendChild(row);
+}
+
+// A waiting chat that was cancelled before it started is a new chat again,
+// still set to wait for the same one.
+function backToDraft(after) {
+  ui.key = null;
+  ui.sessionId = null;
+  ui.isPrivate = false;
+  ui.afterPick = after;
+  resetView();
+  renderEmptyState();
+  $('title').textContent = 'New conversation';
+  $('agent').disabled = false;
+  renderPrivate();
+  setRunning(false);
+  renderSessions();
+  writeHash();
+}
+
 // ---------- background tasks ----------
 
 // Shells, monitors and subagents the agent left running while it carries on.
@@ -1769,8 +1905,11 @@ function renderTasks() {
 }
 
 async function unqueue(m, edit) {
+  // A waiting chat with nothing left to send stops waiting and is gone.
+  const after = !ui.running && ui.queue.length === 1 ? ui.after : null;
   try {
     const message = await api('/api/unqueue', { key: ui.key, id: m.id });
+    if (after) backToDraft(after);
     if (edit) restoreToComposer([message]);
   } catch (err) {
     alert(err.message);
@@ -1995,6 +2134,8 @@ function renderPrivate() {
   b.setAttribute('aria-pressed', String(ui.private));
   $('end-private').classList.toggle('hidden', !ui.isPrivate || !ui.key);
   $('memory').classList.toggle('hidden', !inChat() || (ui.key ? ui.isPrivate : ui.private));
+  // Shown in the same cases, give or take a private chat.
+  renderAfterPick();
 }
 
 function endPrivateChat() {
@@ -2456,6 +2597,7 @@ $('composer').addEventListener('submit', async (e) => {
   const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
   const isNew = !ui.key;
   const dirs = chatDirs();
+  const after = isNew && canWait() ? ui.afterPick : null;
   if (isNew) {
     // Our own temp key, so events sent before the reply already reach us.
     ui.key = 'new-' + randomId();
@@ -2466,7 +2608,7 @@ $('composer').addEventListener('submit', async (e) => {
     renderPrivate();
   }
   try {
-    await api('/api/send', {
+    const r = await api('/api/send', {
       agent: ui.agent,
       sessionId: ui.sessionId,
       // A new chat whose first turn is still starting is found by its temp key.
@@ -2479,10 +2621,17 @@ $('composer').addEventListener('submit', async (e) => {
       effort: $('effort').value || undefined,
       dirs,
       private: isNew && ui.isPrivate,
+      after: after?.key,
     });
     if (isNew) loadSessions();
-    // A chat paused at a limit only queued it.
-    if (!ui.resume || ui.running) setRunning(true);
+    if (isNew) ui.afterPick = null;
+    // Waiting for another chat: its status may still be on the way.
+    if (r.waiting && !ui.after && !ui.running) {
+      ui.after = after;
+      renderWaiting();
+    }
+    // A chat paused at a limit, or waiting for another chat, only queued it.
+    setRunning(ui.running || !(r.waiting || ui.after || ui.resume));
     input.value = '';
     hideCommandMenu();
     attachments.length = 0;
@@ -2671,8 +2820,9 @@ async function runAction(a, force = false) {
   } catch (err) {
     actionRunning = null;
     renderActions();
-    // A restart would stop running turns: the server refuses once, and asks.
-    if (err.status === 409 && err.data?.running) {
+    // A restart would stop running turns and lose chats waiting for
+    // another one: the server refuses once, and asks.
+    if (err.status === 409 && (err.data?.running || err.data?.waiting)) {
       if (confirm(`${err.message} ${a.label} anyway?`)) return runAction(a, true);
       return;
     }

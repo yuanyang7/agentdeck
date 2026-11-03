@@ -174,6 +174,34 @@ result that failed with HTTP 429 or says "You've hit your … limit".
 
 Codex, opencode and Gemini turns that hit a limit end as before.
 
+## Running chats in order
+
+A new chat sent with **Run after…** set (`after` in `POST /api/send`, the
+other chat's key) doesn't start while that chat is working: running a turn,
+paused at a [usage limit](#usage-limits), or waiting for a chat itself. Its
+first message waits in its queue on the host, and it starts with it once
+that chat stops working, however its turn ended: finished, failed or
+stopped. A chat paused at a limit counts as still working, since it
+continues by itself. If the other chat isn't working by the time the
+message is sent, the new chat starts right away.
+
+- **Run after…** lists the chats `GET /api/working` returns, from every
+  workspace, this one's first. Only a new chat can wait, and not one asking
+  several agents, a Just ask task or a private chat.
+- **Start now** (or **Send now** on its queued message) starts it at once.
+  **Cancel** drops it, puts its messages back into that device's message
+  box, and leaves a new chat that still waits for the same one
+  (`POST /api/after` with `cancel`). Removing its only queued message does
+  the same.
+- Chats can wait in a chain. When a chat in the middle is cancelled, the
+  ones waiting for it wait for what it waited for instead. Several chats
+  waiting for the same one all start together when it finishes.
+- A waiting chat is listed with a hollow gray dot and "Waits for …" until
+  it starts and gets a session id like any new chat.
+- Waiting chats live only in the server's memory, so a restart loses them;
+  **Restart** asks first while any are waiting. If the chat they wait for is
+  deleted or moved under a new id, they start.
+
 ## Skills
 
 The `/` menu lists what the chat's agent offers in the project folder. Each

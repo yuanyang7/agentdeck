@@ -150,6 +150,18 @@ same conversation open here and in a terminal, desktop app, opencode TUI or Anti
 at the same time — each keeps its own copy in memory and won't see the
 other's messages.
 
+### Running chats in order
+
+A new conversation can wait for another one to finish first, so two tasks
+that would edit the same files run one after the other. Before sending its
+first message, click **Run after…** in the composer and pick one of the
+chats that are working (in any workspace). The message waits on the host,
+the chat is listed with "Waits for …" in the sidebar, and it starts by
+itself as soon as that chat stops working. A bar above the composer offers
+**Start now** and **Cancel**; messages sent meanwhile wait with the first
+one. Chats can wait in a chain, each for the one before. See
+[docs/REFERENCE.md](docs/REFERENCE.md#running-chats-in-order).
+
 ### Usage limits
 
 When a Claude Code turn runs into a plan limit ("You've hit your session
