@@ -93,6 +93,8 @@
 
       <div id="resume" class="queue resume" role="status" aria-label="Paused at a usage limit"></div>
 
+      <div id="waiting-for" class="queue resume" role="status" aria-label="Waiting for another chat"></div>
+
       <div id="tasks" class="queue tasks" role="region" aria-label="Running in the background"></div>
 
       <div id="queue" class="queue" role="region" aria-label="Queued messages"></div>
@@ -107,6 +109,7 @@
             <select id="agent" title="Agent (for a new conversation)" aria-label="Agent" class="hidden"></select>
             <button type="button" id="compare" class="compare-button hidden" aria-haspopup="dialog" title="Ask several agents the same thing">Compare…</button>
             <button type="button" id="agents-chip" class="agents-chip hidden" aria-haspopup="dialog"></button>
+            <button type="button" id="after" class="folders-button hidden" aria-haspopup="dialog">Run after…</button>
             <select id="mode" title="Mode" aria-label="Mode"></select>
             <select id="model" title="Model" aria-label="Model"></select>
             <select id="effort" title="Effort" aria-label="Effort"></select>
@@ -174,6 +177,19 @@
       <div id="folder-current" class="folder-list"></div>
       <select id="folder-add" aria-label="Add a folder"></select>
       <div class="tag-actions">
+        <button type="submit" class="primary">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="after-dialog" class="tag-dialog">
+    <form method="dialog" id="after-form">
+      <h2>Run after another chat</h2>
+      <p class="muted folder-hint">This chat’s first message waits on the host and starts by itself once the chat you pick stops working, so two tasks don’t edit the same files at once. Messages you send meanwhile wait with it.</p>
+      <div id="after-list" class="folder-list after-list" role="radiogroup" aria-label="Chat to wait for"></div>
+      <p id="after-error" class="error" aria-live="polite"></p>
+      <div class="tag-actions">
+        <button type="button" id="after-cancel">Cancel</button>
         <button type="submit" class="primary">Done</button>
       </div>
     </form>
