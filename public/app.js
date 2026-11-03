@@ -744,6 +744,21 @@ async function openConversation(agent, id) {
 
 // ---------- rendering ----------
 
+// A bare URL runs until whitespace in GFM, so in Chinese text, where nothing
+// separates it from the next words, the link swallowed them:
+// "https://a.com/x，然后看" linked all of "x，然后看". URLs now end at the first
+// CJK character or full-width punctuation mark.
+const URL_STOP = /[\u2014\u2018-\u201f\u2026\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\ufe30-\ufe4f\uff00-\uffef]/;
+marked.use({
+  tokenizer: {
+    url(src) {
+      const cut = /^[^\s<]*/.exec(src)[0].search(URL_STOP);
+      if (cut <= 0) return false;
+      return marked.Tokenizer.prototype.url.call(this, src.slice(0, cut));
+    },
+  },
+});
+
 function md(text) {
   return DOMPurify.sanitize(marked.parse(text || '', { breaks: false, gfm: true }));
 }
