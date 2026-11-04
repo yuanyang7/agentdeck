@@ -368,6 +368,9 @@ function renderTags() {
 // `recent`); each "Show more" reveals SHOW_MORE_STEP more of them.
 const RECENT_COUNT = 3;
 const SHOW_MORE_STEP = 5;
+// Where each chat is, as the server reads it from the chat's turns
+// (lib/stages.mjs); shown first in the row's meta line.
+const STAGE_LABELS = { design: 'Design', build: 'Building', test: 'Testing', ship: 'Shipped', ask: 'Q&A' };
 
 function expandWorkspace(dir) {
   if (ui.expandedWorkspace !== dir) ui.shownCount = RECENT_COUNT + SHOW_MORE_STEP;
@@ -489,6 +492,11 @@ function sessionRow(s, showWorkspace = false) {
     const meta = el('div', 's-meta');
     // A group of agents asked the same thing is one row with every agent's badge.
     for (const a of s.group ? s.group.agents : ui.agents.length > 1 ? [s.agent] : []) meta.appendChild(el('span', 'agent-badge', agentLabel(a)));
+    if (STAGE_LABELS[s.stage]) {
+      const stage = el('span', `stage stage-${s.stage}`, STAGE_LABELS[s.stage]);
+      stage.title = s.stageWhy || '';
+      meta.append(stage, ' · ');
+    }
     meta.appendChild(document.createTextNode([showWorkspace && ui.projects.find((p) => p.dir === s.dir)?.name,
       s.pendingCount ? 'Needs decision' : s.elsewhere ? 'Working in another app' : s.running ? 'Working' : s.resumeAt ? `Continues ${resumeTime(s.resumeAt)}` : s.waitingFor ? `Waits for “${s.waitingFor}”` : s.unread ? 'Finished · unread' : s.stopped ? 'Stopped mid-turn' : null,
       timeAgo(s.updatedAt), s.branch].filter(Boolean).join(' · ')));

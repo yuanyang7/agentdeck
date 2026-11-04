@@ -236,6 +236,36 @@ Tags are saved on the host in `~/.agentdeck/tags.json` (migrated
 automatically from `~/.claude-web/tags.json` if you used an older release),
 so every device sees the same tags and quick tags.
 
+## Stages
+
+A chat's stage comes from its transcript (every agent's, through the same
+items the page renders), not from a model call, so it costs nothing and
+needs no login. Each turn (one message and what the agent did with it) is
+read on its own:
+
+| Stage | The turn… |
+| ----- | --------- |
+| Shipped | committed, pushed, opened or merged a PR, published or deployed after its last code edit |
+| Building | edited code, with an edit tool or from the shell (`sed -i`, `cat > file`, a script that writes files) |
+| Testing | ran tests, type checks, linters, builds or screenshots, and edited nothing |
+| Design | was in plan mode, or only wrote a plan, design or spec document |
+
+A turn that did none of these is talk. The chat's stage is that of its
+latest turn that did something; talk after it keeps that stage, unless the
+message reads like planning ("design", "plan", "should we", 方案, 可行性
+and the like), which makes it Design. A chat that has only ever been talk
+is Q&A. Edits to the agents' own files (memory notes under `~/.claude` and
+the like) don't count, and a report from a background task isn't a new
+turn.
+
+Stages are worked out on the host in the background, one chat at a time,
+only for chats the sidebar shows, and kept in `~/.agentdeck/stages.json`
+with the time each chat last changed. A chat is read again once it has
+changed and its turn has ended, and the sidebars update when a stage does,
+so a stage may lag the chat by one listing. They're a guess from the
+transcript: a chat can say Building while you're mostly discussing, or Q&A
+when the agent changed files in a way it doesn't recognise.
+
 ## Forks
 
 Each agent copies a conversation itself, so a branch is one of its own
@@ -821,6 +851,8 @@ its own, and the prompt leaves the address once the page has read it.
   its bug queue, and filing reports through the CLI.
 - `lib/resume.mjs`: chats waiting for a plan limit to reset, kept across
   restarts; the waiting itself is in `lib/hub.mjs`.
+- `lib/stages.mjs`: each chat's stage, read from its transcript in the
+  background and cached.
 - `lib/stats.mjs`: the Stats page's data, scanned from the agents' own files
   into hour buckets and cached per file; `public/stats.js` renders it.
 - `lib/agents/`: one adapter per agent (`claude.mjs`, `codex.mjs`,

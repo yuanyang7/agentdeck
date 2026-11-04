@@ -35,6 +35,7 @@ import * as groups from './lib/groups.mjs';
 import * as compare from './lib/compare.mjs';
 import * as memory from './lib/memory.mjs';
 import * as privates from './lib/private.mjs';
+import { stageOf, onStagesChanged } from './lib/stages.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STARTED = Date.now(); // pages compare this to tell a restarted server from the old one
@@ -406,6 +407,16 @@ setInterval(async () => {
   workingElsewhere = now;
 }, WORKING_POLL).unref();
 
+// A listed chat's stage (lib/stages.mjs). Chats in the Chat workspace aren't
+// project work, so they have none. Fresher stages come in the background and
+// the sidebars refresh then.
+function withStage(chat) {
+  const b = backends.get(chat.agent);
+  if (b && chat.dir !== CHAT_DIR) Object.assign(chat, stageOf(b, chat));
+  return chat;
+}
+onStagesChanged(() => hub.broadcast({ type: 'sessions_changed' }));
+
 async function listProjects() {
   const byDir = new Map();
   // The Chat workspace first (lib/chat-mode.mjs), then `inRoot`: directly
@@ -450,6 +461,8 @@ async function listProjects() {
     p.recent.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     p.attention.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     p.recent = p.recent.slice(0, 3);
+    // Only the chats the sidebar shows, so a project's old chats aren't read.
+    for (const chat of new Set([...p.recent, ...p.attention, ...p.tagged])) withStage(chat);
   }
   return [...byDir.values()].sort((a, b) => (b.chat || 0) - (a.chat || 0) || b.lastModified - a.lastModified || a.name.localeCompare(b.name));
 }
@@ -491,7 +504,7 @@ async function listConversations(dir) {
       if (privates.isPrivate(b.id, s.id)) continue;
       const key = `${b.id}:${s.id}`;
       const live = hub.get(key);
-      out.push({ ...s, agent: b.id, key, dir, ...runState(s, live), pendingCount: live?.pending.size || 0, unread: isUnread(b.id, s.id), tags: tagsOf(b.id, s.id), group: groups.groupOf(b.id, s.id) });
+      out.push(withStage({ ...s, agent: b.id, key, dir, ...runState(s, live), pendingCount: live?.pending.size || 0, unread: isUnread(b.id, s.id), tags: tagsOf(b.id, s.id), group: groups.groupOf(b.id, s.id) }));
     }
   }
   out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
