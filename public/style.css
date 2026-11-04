@@ -13,6 +13,7 @@
   --code-bg: #f4f5f9;
   --danger: #c64d56;
   --ok: #31a879;
+  --ok-ink: #237a58; /* --ok as small text */
   --warn-bg: #fffaf0;
   --warn-border: #f0d9a5;
   --warn-ink: #9b5e1c;
@@ -34,6 +35,7 @@
     --code-bg: #1b2030;
     --danger: #ff8a94;
     --ok: #67d6a1;
+    --ok-ink: #67d6a1;
     --warn-bg: #332b24;
     --warn-border: #705b3a;
     --warn-ink: #f1bb73;
@@ -121,6 +123,11 @@ select { max-width: 100%; min-width: 0; padding: 8px 10px; cursor: pointer; }
 .sessions .s-title { font-size: 13px; font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px; }
 .sessions .s-title.unread { font-weight: 750; }
 .sessions .s-meta { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sessions .stage { font-weight: 650; }
+.stage-design { color: var(--warn-ink); }
+.stage-build { color: var(--accent); }
+.stage-test { color: var(--text); }
+.stage-ship { color: var(--ok-ink); }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 7px; animation: pulse 1.3s infinite; }
 .dot.unread { background: var(--accent); animation: none; }
 /* Same pulse, hollow: the turn runs in the terminal or desktop app, not here. */

@@ -107,6 +107,17 @@ sidebar has a chip for every tag; click one to list that tag's
 conversations from all workspaces. Tags live on the host and sync across every
 device, but are never written into the agents' own transcripts.
 
+### Stages
+
+Each project chat in the sidebar says where it is: **Design**, **Building**,
+**Testing**, **Shipped** or **Q&A**. Nobody sets it. It's read from what the
+chat's turns actually did: editing code is Building, running tests or
+taking screenshots without editing is Testing, a commit, push or PR after
+the last edit is Shipped, and plan mode, a plan doc or talking through an
+approach is Design. A chat that only asked questions is Q&A. Hover the word
+to see what decided it. Chats in **Chat** have no stage. See
+[docs/REFERENCE.md](docs/REFERENCE.md#stages).
+
 ### Images
 
 Attach up to 10 images to a message — click 📎, paste, or drag files onto the
