@@ -160,7 +160,9 @@ the background gets checked and carried on), and a message sent meanwhile
 goes straight in rather than waiting in the queue. **Stop** then ends the
 turn and the tasks with it. After two hours of waiting, or if the agent
 doesn't reply once the tasks are done, the turn ends; anything still running
-is stopped, and the chat says so with a "Stopped when the turn ended" line. Permission
+is stopped, and the chat says so with a "Stopped when the turn ended" line.
+Opening a Claude Code **Agent** card shows what that subagent did (its tool
+calls, text and thinking) under **Subagent log**, refreshed while it runs. Permission
 prompts (file edits, shell commands, plan approval, questions) appear on
 every connected device, and whichever answers first wins. Avoid keeping the
 same conversation open here and in a terminal, desktop app, opencode TUI or Antigravity CLI
