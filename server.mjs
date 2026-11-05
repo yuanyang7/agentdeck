@@ -31,6 +31,7 @@ import * as feedbackloop from './lib/feedbackloop.mjs';
 import { collect as collectStats } from './lib/stats.mjs';
 import { autoResume, setAutoResume } from './lib/resume.mjs';
 import { CHAT_DIR, UPLOADS_DIR, CHAT_MODE } from './lib/chat-mode.mjs';
+import { ATTACH_NOTE } from './lib/attachments.mjs';
 import * as groups from './lib/groups.mjs';
 import * as compare from './lib/compare.mjs';
 import * as memory from './lib/memory.mjs';
@@ -222,7 +223,9 @@ const hub = new Hub({
     if (conv.private) privates.add(conv.agent, conv.sessionId);
   },
   remember: (text) => memory.remember(memory.notesIn(text)),
-  instructions: async (dir) => (sameFolder(dir, CHAT_DIR) ? null : workspaceIndex(listProjects, PROJECT_ROOTS)),
+  // Chats get the attach note in the chat prompt instead.
+  instructions: async (dir) =>
+    sameFolder(dir, CHAT_DIR) ? null : [await workspaceIndex(listProjects, PROJECT_ROOTS), ATTACH_NOTE].filter(Boolean).join('\n\n'),
   mentions: (text, dir, dirs) => mentionedFolders(text, rootFolders(PROJECT_ROOTS), dir, dirs),
   created: (dir, since) => newProjects(dir, since),
 });
@@ -586,6 +589,13 @@ const MAX_IMAGE_FILE_BYTES = 50 * 1024 * 1024; // videos and audio are streamed,
 const UPLOADS = UPLOADS_DIR;
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 
+// A Content-Disposition that saves the file under its own name: an ASCII
+// fallback for old browsers and the exact name, UTF-8 encoded, for the rest.
+function attachmentHeader(name) {
+  const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
 // The byte range a `Range: bytes=a-b` header asks for, or null for the whole
 // file. Throws when the range can't be satisfied.
 function byteRange(header, size) {
@@ -918,12 +928,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, await usageAlerts());
     }
 
-    if (p === '/api/file' && req.method === 'GET') {
+    if (p === '/api/file' && (req.method === 'GET' || req.method === 'HEAD')) {
       // Image, video and audio files on this machine that an agent showed or
-      // linked to.
+      // linked to. With `download=1`, any file, sent as a download: one an
+      // agent attached to a reply. HEAD tells an attachment card its size.
       const asked = url.searchParams.get('path') || '';
+      const download = url.searchParams.get('download') === '1';
       const file = asked.startsWith('~/') ? path.join(os.homedir(), asked.slice(2)) : asked;
-      const type = FILE_TYPES[path.extname(file).toLowerCase()];
+      const type = FILE_TYPES[path.extname(file).toLowerCase()] || (download ? 'application/octet-stream' : null);
       if (!path.isAbsolute(file) || !type) return send(res, 400, { error: 'Not an image, video or audio path' });
       let stat;
       try {
@@ -931,7 +943,7 @@ const server = http.createServer(async (req, res) => {
       } catch {
         return send(res, 404, { error: 'File not found' });
       }
-      const streamed = /^(video|audio)\//.test(type);
+      const streamed = download || /^(video|audio)\//.test(type);
       if (!stat.isFile() || (!streamed && stat.size > MAX_IMAGE_FILE_BYTES)) return send(res, 404, { error: 'File not found' });
       // Players fetch videos and audio in ranges to seek, and Safari won't
       // play them without that.
@@ -947,12 +959,13 @@ const server = http.createServer(async (req, res) => {
         'content-length': stat.size ? end - start + 1 : 0,
         'accept-ranges': 'bytes',
         ...(range && { 'content-range': `bytes ${start}-${end}/${stat.size}` }),
+        ...(download && { 'content-disposition': attachmentHeader(path.basename(file)) }),
         'cache-control': 'no-store',
         'x-content-type-options': 'nosniff',
         // SVG can carry scripts; never let one run on this origin.
         'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
       });
-      if (!stat.size) return res.end();
+      if (!stat.size || req.method === 'HEAD') return res.end();
       return fs
         .createReadStream(file, { start, end })
         .on('error', () => res.destroy())

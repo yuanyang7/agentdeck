@@ -773,29 +773,109 @@ function md(text) {
 
 // Markdown images, videos and audio that point at files on the host (an absolute
 // path, a file:// URL or a path relative to the project) can't load in another
-// device's browser, so they're fetched through the server instead. This runs
-// before DOMPurify's URL check, which would drop file:// URLs.
-function hostFile(src) {
-  if (/^(https?:|data:|blob:|\/api\/)/i.test(src)) return src;
-  let file = src;
+// device's browser, so they're fetched through the server instead. Links to
+// files on the host download them the same way. This runs before DOMPurify's
+// URL check, which would drop file:// URLs.
+function hostPath(src) {
+  if (/^(https?:|data:|blob:|\/api\/|#)/i.test(src)) return null;
   if (/^file:\/\//i.test(src)) {
     try {
-      file = decodeURIComponent(new URL(src).pathname);
+      return decodeURIComponent(new URL(src).pathname);
     } catch {
-      return src;
+      return null;
     }
-  } else if (/^[a-z][\w+.-]*:/i.test(src)) {
-    return src;
-  } else if (!src.startsWith('/')) {
-    if (!ui.dir) return src;
-    file = ui.dir + '/' + src.replace(/^\.\//, '');
   }
-  return '/api/file?path=' + encodeURIComponent(file);
+  if (/^[a-z][\w+.-]*:/i.test(src)) return null;
+  if (src.startsWith('/') || src.startsWith('~/')) return src;
+  return ui.dir ? ui.dir + '/' + src.replace(/^\.\//, '') : null;
 }
+
+function hostFile(src) {
+  const file = hostPath(src);
+  return file ? '/api/file?path=' + encodeURIComponent(file) : src;
+}
+
+const downloadUrl = (file) => '/api/file?download=1&path=' + encodeURIComponent(file);
 
 DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
   if (/^(IMG|VIDEO|AUDIO|SOURCE)$/.test(node.nodeName) && data.attrName === 'src') data.attrValue = hostFile(data.attrValue.trim());
+  if (node.nodeName === 'A' && data.attrName === 'href') {
+    // [report](out/report.pdf#page=2): the file, not the anchor in it.
+    const file = hostPath(data.attrValue.trim().replace(/#.*$/, ''));
+    if (file) {
+      data.attrValue = downloadUrl(file);
+      node.setAttribute('download', '');
+    }
+  }
 });
+
+// Files a reply attaches: a fenced `attach` block, one path per line
+// (lib/attachments.mjs). Each becomes a card that downloads the file. The
+// size is asked for once the reply is complete, not on every streamed frame.
+const ATTACH_MAX = 20;
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) v /= 1024, i++;
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
+}
+
+// Where an attached file is, short: from the project's folder name when it's
+// in the project, otherwise with the home folder as ~.
+function shortFolder(p) {
+  if (ui.dir && (p === ui.dir || p.startsWith(ui.dir + '/'))) return ui.dir.split('/').pop() + p.slice(ui.dir.length);
+  return p.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~');
+}
+
+function attachmentCard(raw, streaming) {
+  const file = hostPath(raw.replace(/^["'`]|["'`]$/g, ''));
+  if (!file) return null;
+  const name = file.split('/').pop() || file;
+  const folder = file.slice(0, file.length - name.length - 1) || '/';
+  const ext = /\.([\w-]{1,8})$/.exec(name)?.[1];
+  const a = el('a', 'reply-file');
+  a.href = downloadUrl(file);
+  a.setAttribute('download', name);
+  a.title = file;
+  const body = el('span', 'reply-file-body');
+  const meta = el('span', 'reply-file-meta');
+  if (ext) meta.append(el('span', 'reply-file-ext', ext.toUpperCase()), ' · ');
+  const size = el('span', 'reply-file-size', '…');
+  meta.append(size, ' · ', shortFolder(folder));
+  body.append(el('span', 'reply-file-name', name), meta);
+  a.append(body, el('span', 'reply-file-action', 'Download'));
+  if (!streaming) {
+    fetch(a.href, { method: 'HEAD' })
+      .then((r) => {
+        if (!r.ok) throw new Error();
+        size.textContent = formatBytes(Number(r.headers.get('content-length')) || 0);
+      })
+      .catch(() => {
+        a.classList.add('missing');
+        a.removeAttribute('href');
+        a.removeAttribute('download');
+        a.setAttribute('aria-disabled', 'true');
+        size.textContent = 'not on the host';
+        a.lastChild.textContent = 'Unavailable';
+      });
+  }
+  return a;
+}
+
+function addAttachments(root, streaming) {
+  for (const code of root.querySelectorAll('pre > code.language-attach')) {
+    const list = el('div', 'reply-files');
+    const paths = [...new Set(code.textContent.split('\n').map((l) => l.trim()).filter(Boolean))].slice(0, ATTACH_MAX);
+    for (const p of paths) {
+      const card = attachmentCard(p, streaming);
+      if (card) list.appendChild(card);
+    }
+    if (list.children.length) code.parentElement.replaceWith(list);
+  }
+}
 
 // Image, video and audio files a reply mentions by name, e.g.
 // `web-1-entry.png`, /tmp/shots/demo.mp4 or out/narration.mp3, get thumbnails
@@ -1170,6 +1250,7 @@ function renderItem(item, streaming) {
         chip.append(el('span', 'remembered-kicker', 'REMEMBERED'), el('span', 'remembered-notes', code.textContent.trim()));
         code.parentElement.replaceWith(chip);
       }
+      addAttachments(d, streaming);
       for (const img of d.querySelectorAll('img')) {
         // ![demo](clip.mp4) and ![voice](take.mp3) play inline.
         const kind = mediaKind(img.getAttribute('src') || '');

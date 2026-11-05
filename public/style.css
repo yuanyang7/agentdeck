@@ -263,6 +263,21 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .msg-assistant a img { cursor: pointer; }
 .msg-images video, .msg-assistant video { max-width: 100%; max-height: 360px; border-radius: 8px; background: #000; }
 .msg-images audio, .msg-assistant audio { display: block; width: 360px; max-width: 100%; height: 40px; }
+.reply-files { display: flex; flex-direction: column; gap: 6px; max-width: min(520px, 100%); margin: 10px 0 12px; }
+.reply-file { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--code-bg); color: var(--text); text-decoration: none; touch-action: manipulation; transition: border-color .15s ease-out, transform .16s ease-out; }
+.reply-file:active:not(.missing) { transform: scale(.98); }
+.reply-file-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.msg-assistant .reply-file-name { overflow: hidden; color: var(--text); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.reply-file-meta { overflow: hidden; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.reply-file-ext { color: var(--text); font-weight: 650; letter-spacing: .04em; }
+.reply-file-action { flex: none; color: var(--accent); font-size: 13px; font-weight: 600; }
+.reply-file.missing { cursor: default; opacity: .6; }
+.reply-file.missing .reply-file-action { color: var(--muted); font-weight: 500; }
+@media (hover: hover) and (pointer: fine) {
+  .reply-file:not(.missing):hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+  .reply-file:not(.missing):hover .reply-file-action { text-decoration: underline; }
+}
+@media (prefers-reduced-motion: reduce) { .reply-file { transition: border-color .15s ease-out; } .reply-file:active:not(.missing) { transform: none; } }
 .agent-badge { display: inline-block; font-size: 10px; padding: 1px 6px; margin-right: 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); }
 
 /* Approvals */
