@@ -1004,6 +1004,17 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/sessions') return send(res, 200, await listConversations(url.searchParams.get('dir')));
 
+    if (p === '/api/subagent' && req.method === 'GET') {
+      // What a Claude Code subagent did, for its Agent card (lib/agents/claude.mjs).
+      const backend = await backendFor('claude');
+      const session = url.searchParams.get('session') || '';
+      const tool = url.searchParams.get('tool') || '';
+      if (!backend?.subagent || !/^[\w-]+$/.test(session) || !/^[\w-]+$/.test(tool)) return send(res, 400, { error: 'Bad request' });
+      const log = await backend.subagent(session, tool);
+      if (!log) return send(res, 404, { error: 'No log was kept for this subagent.' });
+      return send(res, 200, log);
+    }
+
     const m = p.match(/^\/api\/sessions\/([\w-]+)\/([\w-]+)$/);
     if (m && req.method === 'GET') {
       const [, agent, id] = m;

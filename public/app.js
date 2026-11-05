@@ -1284,6 +1284,7 @@ function renderItem(item, streaming) {
       s.appendChild(el('span', 't-state', TOOL_STATE[item.status] || '…'));
       const body = el('div', 't-body');
       if (item.detail) body.appendChild(el('pre', '', item.detail));
+      if (item.subagent) body.appendChild(subagentSection(item, d));
       if (item.output) body.appendChild(el('pre', '', item.output));
       d.append(s, body);
       if (!item.images?.length) return d;
@@ -1296,6 +1297,85 @@ function renderItem(item, streaming) {
       return el('div', 'result-line' + (item.error ? ' err' : ''), item.text);
   }
   return el('div', 'hidden');
+}
+
+// What a Claude Code subagent did, under its Agent card: loaded from its own
+// transcript when the card is opened, and again every few seconds while it
+// runs. Kept by tool call id, so a redrawn card shows it at once.
+const subagentLogs = new Map();
+const SUBAGENT_POLL_MS = 3000;
+
+function subagentSection(item, card) {
+  const box = el('div', 'subagent');
+  box.dataset.for = item.id;
+  box.dataset.running = item.status === 'running' ? '1' : '';
+  const list = el('div', 'subagent-items');
+  const status = el('div', 'subagent-status');
+  status.setAttribute('aria-live', 'polite');
+  box.append(el('div', 'subagent-head', 'Subagent log'), list, status);
+  box.draw = () => {
+    const log = subagentLogs.get(item.id);
+    // Nested cards the reader opened stay open across a refresh.
+    const open = new Set([...list.querySelectorAll(':scope > details[open], :scope > .tool-wrap > details[open]')].map((n) => n.dataset.id));
+    list.replaceChildren(...(log?.items || []).map((it) => {
+      const node = renderItem(it);
+      const c = node.matches('.tool-wrap') ? node.firstChild : node;
+      c.dataset.id = it.id;
+      if (open.has(it.id)) c.open = true;
+      return node;
+    }));
+    const running = item.status === 'running';
+    status.textContent = log?.error || (!log?.items
+      ? (log?.slow ? 'Loading the subagent’s log…' : '')
+      : running ? (log.items.length ? 'Still running…' : 'Started; nothing logged yet…')
+      : log.items.length ? '' : 'This subagent logged no steps.');
+    status.classList.toggle('err', !!log?.error);
+  };
+  box.draw();
+  card.addEventListener('toggle', () => {
+    if (!card.open) return;
+    const log = subagentLogs.get(item.id);
+    // Loaded while it ran: once more for how it ended.
+    if (!log?.items || item.status === 'running' || log.running) loadSubagent(item);
+  });
+  return box;
+}
+
+function subagentBoxes(id) {
+  return [...document.querySelectorAll(`.subagent[data-for="${CSS.escape(id)}"]`)];
+}
+
+async function loadSubagent(item) {
+  const prev = subagentLogs.get(item.id);
+  if (prev?.loading) return;
+  const log = { ...prev, loading: true, error: null };
+  subagentLogs.set(item.id, log);
+  // A loading line only if it takes a moment.
+  const slow = setTimeout(() => {
+    log.slow = true;
+    subagentBoxes(item.id).forEach((b) => b.draw());
+  }, 200);
+  let next;
+  try {
+    const data = await api(`/api/subagent?session=${encodeURIComponent(item.subagent)}&tool=${encodeURIComponent(item.id)}`);
+    next = { items: data.items, running: item.status === 'running' };
+  } catch (err) {
+    next = { ...prev, error: err.status === 404 ? 'No log was kept for this subagent.' : `Couldn’t load the subagent’s log: ${err.message}` };
+  }
+  clearTimeout(slow);
+  subagentLogs.set(item.id, next);
+  const boxes = subagentBoxes(item.id);
+  boxes.forEach((b) => b.draw());
+  // Keep up with it while it runs and someone is looking.
+  const watched = (b) => b.isConnected && b.dataset.running && b.closest('details')?.open;
+  if (!next.error && boxes.some(watched)) {
+    setTimeout(function poll() {
+      const live = subagentBoxes(item.id).filter(watched);
+      if (!live.length) return;
+      if (document.hidden) return setTimeout(poll, SUBAGENT_POLL_MS);
+      loadSubagent({ ...item, status: 'running' });
+    }, SUBAGENT_POLL_MS);
+  }
 }
 
 // Adds an item, or merges it into the one with the same id and redraws that

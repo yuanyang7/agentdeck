@@ -243,13 +243,21 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .tool summary { padding: 8px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; list-style: none; }
 .tool summary::-webkit-details-marker { display: none; }
 .tool summary::before { content: '▸'; color: var(--accent); margin-right: 8px; }
-.tool[open] summary::before { content: '▾'; }
+.tool[open] > summary::before { content: '▾'; }
 .tool .t-name { font-weight: 700; }
 .tool .t-arg { color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
 .tool .t-state { float: right; color: var(--muted); margin-left: 6px; }
 .tool .t-body { padding: 0 12px 12px; }
 .tool .t-body pre { margin: 6px 0 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
 .tool.err summary .t-name, .result-line.err { color: var(--danger); }
+.subagent { margin: 10px 0 4px; }
+.subagent-head { color: var(--muted); font-size: 11px; font-weight: 650; margin-bottom: 6px; }
+.subagent-items { display: flex; flex-direction: column; gap: 6px; padding-left: 12px; border-left: 2px solid var(--border); }
+.subagent-items:empty { display: none; }
+.subagent-items .msg-assistant { font-size: 13px; line-height: 1.6; }
+.subagent-status { color: var(--muted); font-size: 11px; margin-top: 6px; }
+.subagent-status:empty { display: none; }
+.subagent-status.err { color: var(--danger); }
 .result-line { text-align: center; color: var(--muted); font-size: 11px; }
 .msg-images { display: flex; flex-wrap: wrap; gap: 8px; }
 .msg-images + * { margin-top: 8px; }

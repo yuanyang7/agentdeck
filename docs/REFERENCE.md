@@ -642,6 +642,24 @@ attachment`, `nosniff`, a sandboxing CSP), so an HTML or SVG file is never
 rendered on agentdeck's origin. This adds nothing an approved browser
 couldn't already do by asking an agent to `cat` the file.
 
+## Subagent logs
+
+A Claude Code subagent keeps its own transcript beside the chat's:
+`~/.claude/projects/<project>/<session>/subagents/agent-<id>.jsonl`, with an
+`agent-<id>.meta.json` naming the tool call that started it (`toolUseId`).
+The chat itself only shows the **Agent** call and what it returned, so the
+backend tags each Agent (or older Task) item with its session id
+(`subagent`), and opening the card asks `GET /api/subagent?session=&tool=`
+for the rest: `{ agentType, description, items }`, the subagent's tool calls,
+text and thinking as the usual items, minus its prompt (already in the card).
+It comes from the file, not the live stream, so it works the same for a
+running turn, an old chat or a chat started in a terminal. While the card is
+open and the subagent still runs, the page reloads it every 3 s (not while
+the tab is hidden), and once more when it ends. A subagent's own Agent calls
+nest the same way. A fork has no subagents folder of its own, so the other
+sessions in its project folder are searched for the tool call. Other agents'
+subagents aren't shown.
+
 ## Sounds
 
 Two chimes, synthesized in the browser (there's no audio file to load):
