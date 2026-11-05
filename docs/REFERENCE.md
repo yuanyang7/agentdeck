@@ -609,6 +609,39 @@ at the cursor. Characters other than letters, digits and `._@+-` in the name
 become `_`, so the path never needs quoting. Each file can be up to 500 MB.
 Folders can't be dropped. Uploads are kept until you delete them.
 
+### Files from the agent
+
+An agent attaches files to a reply with a fenced code block whose language
+is `attach`, one path on the host per line (absolute, `~/…`, or relative to
+the chat's folder):
+
+````markdown
+```attach
+out/report.pdf
+/tmp/export/orders.csv
+```
+````
+
+Each path becomes a card with the file's name, extension, size and folder,
+and a click downloads it, under its own name, to the device you're on. A
+file that doesn't exist (or a folder) shows as *Unavailable*. Up to 20 files
+per block. A markdown link to a file on the host (`[report](out/report.pdf)`)
+downloads it too.
+
+Every agent is told about this when a conversation starts: next to the
+workspace index in projects, and in the chat instructions in **Chat**, so
+it works with every agent. Conversations started before this, or in a
+terminal, don't know it, but you can ask them to "attach" a file in an
+`attach` block and it works the same.
+
+Downloads go through `/api/file?download=1`, which, unlike the inline media
+above, serves any regular file the user running agentdeck can read, with no
+size limit, and only to approved browsers on this page (never to a request
+from another site). It is sent as a download (`Content-Disposition:
+attachment`, `nosniff`, a sandboxing CSP), so an HTML or SVG file is never
+rendered on agentdeck's origin. This adds nothing an approved browser
+couldn't already do by asking an agent to `cat` the file.
+
 ## Sounds
 
 Two chimes, synthesized in the browser (there's no audio file to load):

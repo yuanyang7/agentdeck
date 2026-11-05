@@ -136,6 +136,12 @@ the host, and its path there is put into your message, so the agent can read
 it. This works from any device, since a browser never tells the page where a
 dropped file lives. See [docs/REFERENCE.md](docs/REFERENCE.md#files).
 
+It works the other way too: an agent can attach files to its reply — a
+report, an export, a generated document, an archive — and each shows as a
+card with the file's name, type and size that downloads it to whichever
+device you're on. Ask for a file on the host ("send me ~/Downloads/invoice.pdf")
+and it arrives the same way.
+
 ### Turns
 
 One conversation runs one turn at a time. Messages sent while the agent is
