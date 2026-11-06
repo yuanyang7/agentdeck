@@ -3695,6 +3695,17 @@ async function fillAgentModels(agent) {
   reset.type = 'button';
   reset.title = `Go back to the ${tier} tier’s model for ${name}`;
   reset.classList.toggle('hidden', !p.custom);
+  // Said when this login offers no model of the tier's price class, so the
+  // comparison isn't quite like with like (lib/compare.mjs).
+  row.querySelector('.agent-note')?.remove();
+  const note = el('p', 'agent-note muted');
+  const showNote = (pick) => {
+    const label = compareState.tiers.find((t) => t.value === tier)?.label || tier;
+    note.textContent = pick.closest && !pick.custom ? `No ${label}-class model for ${name} on this login. This is the closest one it offers.` : '';
+    note.classList.toggle('hidden', !note.textContent);
+  };
+  showNote(p);
+  row.appendChild(note);
   const store = async (body) => {
     try {
       const r = await api('/api/compare', { tier, agent, ...body });
@@ -3706,7 +3717,9 @@ async function fillAgentModels(agent) {
   };
   const save = async () => {
     const pick = await store({ model: model.value || null, effort: effort.value || null });
-    if (pick) reset.classList.toggle('hidden', !pick.custom);
+    if (!pick) return;
+    reset.classList.toggle('hidden', !pick.custom);
+    showNote(pick);
   };
   model.onchange = () => {
     fillEffort(effort.value);
@@ -3719,6 +3732,7 @@ async function fillAgentModels(agent) {
     model.value = pick.model || '';
     fillEffort(pick.effort);
     reset.classList.add('hidden');
+    showNote(pick);
     model.focus();
   };
   box.append(model, effort, reset);
