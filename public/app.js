@@ -877,6 +877,14 @@ function addAttachments(root, streaming) {
   }
 }
 
+// Links in replies open in a new tab so the chat stays put. In-page anchors
+// (#...) keep their normal behaviour.
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.nodeName !== 'A' || !node.hasAttribute('href') || node.getAttribute('href').startsWith('#')) return;
+  node.setAttribute('target', '_blank');
+  node.setAttribute('rel', 'noopener noreferrer');
+});
+
 // Image, video and audio files a reply mentions by name, e.g.
 // `web-1-entry.png`, /tmp/shots/demo.mp4 or out/narration.mp3, get thumbnails
 // or players under the paragraph or list item that mentions them. Bare names
