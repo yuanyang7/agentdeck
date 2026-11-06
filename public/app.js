@@ -998,14 +998,36 @@ function append(node) {
   if (stick) scrollToBottom(true);
 }
 
-// Opens an image full size in a new tab. Data URLs can't be opened as a
-// top-level page, so those are shown through a blob URL instead.
-async function openImage(src) {
-  if (!src.startsWith('data:')) return window.open(src, '_blank');
-  const tab = window.open('', '_blank');
-  const blob = await (await fetch(src)).blob();
-  if (tab) tab.location.href = URL.createObjectURL(blob);
+// Shows an image full size over the chat, in this page. "Open original"
+// still opens it in a new tab; data URLs can't be opened as a top-level
+// page, so those go through a blob URL.
+let viewerBlob = '';
+function openImage(src) {
+  const dlg = $('image-viewer');
+  $('image-viewer-img').src = src;
+  const link = $('image-viewer-open');
+  link.href = src.startsWith('data:') ? '#' : src;
+  link.onclick = src.startsWith('data:')
+    ? async (e) => {
+        e.preventDefault();
+        const tab = window.open('', '_blank');
+        if (!viewerBlob) viewerBlob = URL.createObjectURL(await (await fetch(src)).blob());
+        if (tab) tab.location.href = viewerBlob;
+      }
+    : null;
+  if (!dlg.open) dlg.showModal();
+  $('image-viewer-close').focus();
 }
+$('image-viewer-close').addEventListener('click', () => $('image-viewer').close());
+// A click anywhere but the bar (backdrop or the image itself) closes it.
+$('image-viewer').addEventListener('click', (e) => {
+  if (!e.target.closest('.image-viewer-bar')) $('image-viewer').close();
+});
+$('image-viewer').addEventListener('close', () => {
+  $('image-viewer-img').removeAttribute('src');
+  if (viewerBlob) URL.revokeObjectURL(viewerBlob);
+  viewerBlob = '';
+});
 
 // 'video', 'audio' or 'image' for a src, judged by its file extension (for
 // /api/file URLs, the extension of the host path).

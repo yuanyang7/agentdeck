@@ -631,6 +631,21 @@ body.stats-open { overflow: hidden; }
   .usage-button { font-size: 11px; }
   .msg-user { max-width: 94%; }
 }
+/* Image viewer: the image fills the viewport over a dark backdrop. */
+.image-viewer { border: 0; padding: 0; margin: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; background: transparent; display: none; align-items: center; justify-content: center; overscroll-behavior: contain; }
+.image-viewer[open] { display: flex; animation: viewer-in 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+.image-viewer::backdrop { background: rgba(10, 12, 20, .88); }
+.image-viewer img { max-width: calc(100vw - 32px); max-height: calc(100dvh - 96px); object-fit: contain; border-radius: 6px; background: var(--card); cursor: zoom-out; }
+.image-viewer-bar { position: fixed; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); display: flex; align-items: center; gap: 8px; }
+.image-viewer-bar a { color: #f0f2f9; font-size: 14px; padding: 10px 12px; border-radius: 8px; text-decoration: none; }
+.image-viewer-bar button { width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; font-size: 26px; line-height: 1; color: #f0f2f9; background: rgba(255, 255, 255, .12); touch-action: manipulation; }
+.image-viewer-bar a:focus-visible, .image-viewer-bar button:focus-visible { outline: 2px solid #f0f2f9; outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) {
+  .image-viewer-bar a:hover { background: rgba(255, 255, 255, .12); }
+  .image-viewer-bar button:hover { background: rgba(255, 255, 255, .22); }
+}
+.image-viewer-bar button:active { transform: scale(0.97); }
+@keyframes viewer-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
