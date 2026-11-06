@@ -711,6 +711,8 @@ function renderEmptyState() {
 
 // `id` is a session id, or the temp key of a conversation that is starting.
 async function openConversation(agent, id) {
+  stopVoice({ keep: true });
+  voiceNote('');
   endPrivateChat();
   ui.private = false;
   const dir = ui.dir;
@@ -2485,6 +2487,107 @@ input.addEventListener('keydown', (e) => {
   }
 });
 
+// ---------- voice input ----------
+
+// The microphone button dictates into the message box through the browser's
+// own speech recognition. Chrome and Safari send the audio to Google or
+// Apple for that; Firefox has no recognition, so it never shows the button.
+// Browsers only open the microphone on https:// or localhost, so over plain
+// http the button explains that instead of listening. Words appear as they
+// are recognised, after whatever was already typed, and nothing is sent
+// until Send is pressed.
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const voice = { rec: null, base: '', finals: '' }; // rec is set while listening
+
+function voiceNote(text) {
+  $('voice-note').textContent = text;
+  $('voice-note').classList.toggle('hidden', !text);
+  if (text) $('announcement').textContent = text;
+}
+
+function setListening(on) {
+  $('mic').setAttribute('aria-pressed', String(on));
+  $('mic').title = on ? 'Stop dictating' : 'Dictate (your browser recognises the speech)';
+  if (on) input.placeholder = 'Listening…';
+  else if (input.placeholder === 'Listening…') input.placeholder = composerPlaceholder(ui.running, ui.running && !ui.waiting);
+}
+
+const VOICE_ERRORS = {
+  'not-allowed': "Microphone access was blocked. Allow it for this site in the browser's settings, then try again.",
+  'service-not-allowed': "This browser doesn't allow speech recognition here.",
+  'audio-capture': 'No microphone was found.',
+  network: 'Speech recognition needs the internet: the browser sends the audio to its vendor to recognise it.',
+};
+
+function startVoice() {
+  if (!window.isSecureContext) {
+    voiceNote('Voice input needs HTTPS: browsers only open the microphone on a secure page. Open agentdeck through `tailscale serve` (see docs/REFERENCE.md, Voice input).');
+    return;
+  }
+  voiceNote('');
+  const rec = new Recognition();
+  rec.lang = navigator.language || 'en-US';
+  rec.continuous = true;
+  rec.interimResults = true;
+  voice.rec = rec;
+  voice.base = input.value && !/\s$/.test(input.value) ? input.value + ' ' : input.value;
+  voice.finals = '';
+  setListening(true);
+  rec.onresult = (e) => {
+    if (voice.rec !== rec) return;
+    // Rebuilt from the whole list every time: Safari re-sends earlier
+    // results, Chrome only the changed tail, and both keep the list whole.
+    let finals = '';
+    let interim = '';
+    for (const r of e.results) {
+      if (r.isFinal) finals += r[0].transcript;
+      else interim += r[0].transcript;
+    }
+    voice.finals = finals;
+    input.value = voice.base + finals + interim;
+    autosize();
+    input.scrollTop = input.scrollHeight;
+  };
+  rec.onerror = (e) => {
+    if (voice.rec !== rec) return;
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    voiceNote(VOICE_ERRORS[e.error] || `Voice input failed (${e.error}).`);
+  };
+  rec.onend = () => {
+    if (voice.rec !== rec) return;
+    voice.rec = null;
+    input.value = voice.base + voice.finals;
+    autosize();
+    setListening(false);
+    input.focus({ preventScroll: true });
+  };
+  try {
+    rec.start();
+  } catch (err) {
+    voice.rec = null;
+    setListening(false);
+    voiceNote(`Voice input failed (${err.message}).`);
+  }
+}
+
+// `keep` leaves the box as it is (words recognised but not yet final
+// included), for when the message is being sent right now.
+function stopVoice({ keep = false } = {}) {
+  const rec = voice.rec;
+  if (!rec) return;
+  if (keep) {
+    voice.rec = null;
+    setListening(false);
+    rec.abort();
+  } else rec.stop();
+}
+
+if (Recognition) {
+  $('mic').classList.remove('hidden');
+  $('mic').addEventListener('click', () => (voice.rec ? stopVoice() : startVoice()));
+  window.addEventListener('pagehide', () => stopVoice({ keep: true }));
+}
+
 // ---------- skills and commands ----------
 
 // Typing `/` at the start of a message lists the agent's skills and slash
@@ -2781,6 +2884,7 @@ $('composer').addEventListener('drop', (e) => {
 });
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
+  stopVoice({ keep: true });
   const text = input.value.trim();
   if ((!text && !attachments.length) || !ui.dir || $('send').disabled) return;
   $('send').disabled = true;
@@ -3988,6 +4092,8 @@ function groupBound(ev) {
 }
 
 async function openGroup(id) {
+  stopVoice({ keep: true });
+  voiceNote('');
   endPrivateChat();
   ui.private = false;
   const g = await api('/api/group?id=' + encodeURIComponent(id));

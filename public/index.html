@@ -101,6 +101,7 @@
 
       <form id="composer" class="composer">
         <div id="attachments" class="attachments hidden"></div>
+        <div id="voice-note" class="voice-note hidden" role="status"></div>
         <div id="command-menu" class="command-menu hidden" role="listbox" aria-label="Skills and commands"></div>
         <label class="sr-only" for="input">Message</label>
         <textarea id="input" rows="1" placeholder="Ask anything about your project..." aria-controls="command-menu" aria-autocomplete="list"></textarea>
@@ -118,6 +119,7 @@
             <button type="button" id="private" class="folders-button hidden" aria-pressed="false" title="A private chat: no memory in or out, not listed, deleted when you leave it">Private</button>
           </div>
           <div class="composer-actions">
+            <button type="button" id="mic" class="hidden" aria-pressed="false" aria-label="Dictate a message" title="Dictate (your browser recognises the speech)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
             <button type="button" id="attach" title="Attach images or files (or paste / drop them)" aria-label="Attach images or files">＋</button>
             <input type="file" id="file" multiple hidden>
             <button type="button" id="stop" class="danger hidden">Stop</button>

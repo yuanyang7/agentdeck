@@ -142,6 +142,16 @@ card with the file's name, type and size that downloads it to whichever
 device you're on. Ask for a file on the host ("send me ~/Downloads/invoice.pdf")
 and it arrives the same way.
 
+### Voice
+
+Press the microphone in the composer and talk; the words land in the message
+box as your browser recognises them, and you press Send when they read
+right. This uses the browser's own speech recognition (Chrome and Safari;
+Firefox has none) and needs the page open over HTTPS, since browsers keep
+the microphone off plain `http://`. See
+[docs/REFERENCE.md](docs/REFERENCE.md#voice-input) for the one-line
+`tailscale serve` setup.
+
 ### Turns
 
 One conversation runs one turn at a time. Messages sent while the agent is
