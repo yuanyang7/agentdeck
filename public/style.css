@@ -523,6 +523,7 @@ body.stats-open { overflow: hidden; }
 .tag-dialog .agent-models select { width: auto; min-width: 0; max-width: 100%; margin: 0; padding: 6px 8px; font-size: 13px; }
 .agent-models select:disabled { opacity: .45; cursor: default; }
 .agent-models .model-loading { font-size: 12px; }
+.agent-note { grid-column: 1 / -1; margin: -2px 0 6px 26px; font-size: 12px; line-height: 1.4; }
 .agent-models .changed { flex: none; border: 0; background: transparent; padding: 4px 2px; font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
 @media (hover: hover) and (pointer: fine) { .agent-models .changed:hover { text-decoration: underline; } }
 @media (max-width: 520px) {

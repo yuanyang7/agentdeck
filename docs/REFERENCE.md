@@ -524,21 +524,30 @@ them.
 
 The dialog's tier comes from `lib/compare.mjs`, kept in
 `~/.agentdeck/compare.json` (`{ tier, overrides: { [tier]: { [agent]: { model, effort } } } }`)
-so every device compares the same way. Each tier matches a model in the
-agent's own list, newest first, and asks for an effort the model offers:
+so every device compares the same way. Each tier matches models of the same
+price class (API price per million input/output tokens, October 2026),
+newest first, and asks for an effort the model offers:
 
 | Tier | Claude Code | Codex | Gemini | Effort |
 |---|---|---|---|---|
-| Fast | `haiku` | first `luna` | Flash, low | low |
-| Balanced | `sonnet` | first `sol` | Flash, medium | medium |
-| Best | `opus` | `astra` | Pro if listed, else Flash, high | high |
+| Fast | Haiku 5.5 ($0.10/$0.50) | first `luna` ($0.10/$0.50) | Flash-Lite, low | low |
+| Balanced | `sonnet` ($2/$10) | first `sol` ($2/$10) | Gemini 4 Argon, medium ($2/$10) | medium |
+| Best | `opus` | `astra` | Argon, high; else Pro | high |
+
+When an agent's login doesn't offer the matching model, the tier falls back
+to the closest one and the pick carries `closest: true`, which the dialog
+shows under that agent's row. The fallbacks are `haiku` when Claude Code
+still resolves it to Haiku 4.5 (an SDK older than 0.3.303), and Gemini 3.8
+Flash at the tier's effort for a Gemini login without Flash-Lite or Argon.
+Antigravity CLI offered only 3.8 Flash before Argon reached paid plans, and
+3.8 Flash is priced between the Fast and Balanced classes ($0.75/$3.75).
 
 Antigravity CLI puts Gemini's effort in the model name, so Gemini gets no
 separate effort. opencode fronts many providers and has no tier models: it
 keeps its default model and takes the tier's effort. A model or effort
 changed in the dialog is kept for that agent in that tier (picking the
 tier's own again drops it), and **Use tier's** goes back. `GET
-/api/compare` returns `{ tier, tiers, picks: { [tier]: { [agent]: { model, effort, custom } } } }`;
+/api/compare` returns `{ tier, tiers, picks: { [tier]: { [agent]: { model, effort, custom, closest } } } }`;
 `POST /api/compare` takes `{ tier }`, `{ tier, agent, model, effort }` or
 `{ tier, agent, reset: true }`. Follow-ups are the same request with the member's
 `sessionId`, from the composer at the bottom (every member) or a column's

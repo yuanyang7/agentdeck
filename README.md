@@ -278,9 +278,12 @@ by closing the page (**End private chat** does it on the spot). See
 **Compare…** beside the agent picker asks several agents the same thing:
 tick the agents, send one message, and each answers in its own
 conversation, shown side by side (tabs on a phone). **Fast**, **Balanced**
-or **Best** in the dialog picks a matched model and effort for each agent
-(Balanced is Sonnet, GPT-6.1-Sol and Gemini 3.8 Flash Medium at medium
-effort), so no agent's top model is up against another's cheapest. A model
+or **Best** in the dialog picks a model of the same price class and effort
+for each agent (Fast is Haiku 5.5 and GPT-6-Luna, Balanced is Sonnet 5.5,
+GPT-6.1-Sol and Gemini 4 Argon), so no agent's top model is up against
+another's cheapest. When a login doesn't offer the matching model, the tier
+uses the closest one and the dialog says so: a Gemini login without Argon
+gets Gemini 3.8 Flash in every tier. A model
 changed by hand for an agent sticks for that tier, on every device. Each
 column names the model it answers with. The message box at
 the bottom goes to all of them; each column has a box of its own for a
