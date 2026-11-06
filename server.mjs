@@ -219,7 +219,8 @@ const streams = new Map();
 const hub = new Hub({
   backend: (id) => backends.get(id),
   bound: (conv) => {
-    if (conv.group) groups.join(conv.group, conv.dir, conv.agent, conv.sessionId);
+    // A private group is kept by the page alone, so it lists nowhere.
+    if (conv.group && !conv.private) groups.join(conv.group, conv.dir, conv.agent, conv.sessionId);
     if (conv.private) privates.add(conv.agent, conv.sessionId);
   },
   remember: (text) => memory.remember(memory.notesIn(text)),
@@ -1105,8 +1106,9 @@ const server = http.createServer(async (req, res) => {
       const { agent = 'claude', sessionId, key, dir, text = '', images = [], model, effort, dirs, group, after } = body;
       let { mode } = body;
       // A private chat (lib/private.mjs): a new Chat-mode chat in the Chat
-      // folder, with nothing kept. Continuing one keeps it private.
-      const isPrivate = sessionId ? privates.isPrivate(agent, sessionId) : !!body.private && !group && sameFolder(dir, CHAT_DIR);
+      // folder, with nothing kept, alone or one of a group. Continuing one
+      // keeps it private.
+      const isPrivate = sessionId ? privates.isPrivate(agent, sessionId) : !!body.private && sameFolder(dir, CHAT_DIR);
       if (isPrivate && !sessionId) mode = CHAT_MODE;
       const backend = await backendFor(agent);
       if (!backend) return send(res, 400, { error: 'Unknown agent' });

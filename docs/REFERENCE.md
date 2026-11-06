@@ -450,6 +450,25 @@ gets the prompt on every turn.
 A private chat (`lib/private.mjs`) is a new Chat-mode chat in the Chat
 folder sent with `private: true`. Its prompt leaves the memory out and
 says a private chat keeps nothing, and the hub saves no notes from it.
+
+It also starts without what the user set up for the agent:
+
+- **Claude Code** runs with no setting sources, so no `settings.json`,
+  `CLAUDE.md`, hooks or plugins, and with `strictMcpConfig` and the claude.ai
+  connectors off, so no MCP servers. Claude Code still tells the model the
+  signed-in account's email; nothing turns that off.
+- **Codex** runs on a second app-server whose `CODEX_HOME` is
+  `~/.agentdeck/codex-private`, holding only a link to `~/.codex/auth.json`:
+  no `AGENTS.md`, config, memories, plugins or skills of the user's. The
+  thread starts ephemeral, with the environment description, connector
+  instructions and memories off, so Codex writes no rollout file or index
+  entry; agentdeck keeps its items in memory while the chat is open. Codex
+  logs requests into a database in its home, so the folder is emptied (all
+  but the link) whenever no private chat is open on it, and at startup.
+  Codex's own built-in skills and system messages remain.
+- **Gemini** gets nothing of the user's anyway: Antigravity CLI has no
+  global rules file, MCP servers or plugins unless they are set up.
+- **opencode** is unchanged.
 Agents always write their sessions to disk, so the chat exists in the
 agent's store while it is open; `~/.agentdeck/private.json` lists those
 sessions, the sidebar and `/api/sessions` leave them out, and the page
@@ -464,10 +483,16 @@ conversation database and summary row are removed, and so is its record
 in `jetbox_summaries_proto.pb`, the cache Antigravity CLI writes the rows
 back from when it starts (without that, the title and preview came back on
 its next run). agentdeck's own records of the chat (settings, tags, the
-unread flag) go too. At startup agentdeck
+unread flag) go too. Gemini's delete also removes the chat's transcript
+folder (`brain/<id>`), its generated title (`annotations/<id>.pbtxt`) and
+the CLI's record of it as the folder's latest chat; Antigravity's own debug
+log keeps the id. At startup agentdeck
 deletes any private session still listed, which a closed page left
-behind. A private chat can't be moved or forked. Compare (several agents)
-isn't private.
+behind. A private chat can't be moved or forked.
+
+A Compare group can be private too: every member is, the group isn't
+written to `groups.json`, the page never puts it in the URL, its columns
+have no **Open** link, and leaving it ends every member.
 
 The mode is stored with the chat like any other, so every device continues
 it the same way. In the Chat workspace, the mode picked for a new

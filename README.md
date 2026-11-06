@@ -263,11 +263,14 @@ shows it as **Remembered**. **Memory** in the composer opens the notes to
 edit or clear; they live in one file, `~/.agentdeck/chat/MEMORY.md`.
 Project conversations don't use it.
 
-**Private** in the composer makes the next chat private, with any agent:
-it starts knowing nothing from earlier chats and keeps nothing from this
-one, it isn't listed in the sidebar, and it is deleted from the agent's own
-store when you leave it, for another conversation or by closing the page
-(**End private chat** does it on the spot). See
+**Private** in the composer makes the next chat private, with any agent,
+and with several at once in [Compare](#several-agents-at-once): it starts
+knowing nothing from earlier chats and keeps nothing from this one. It also
+starts clean, without your global instructions (`~/.claude/CLAUDE.md`,
+`~/.codex/AGENTS.md`), settings, plugins or connectors, so an agent answers
+as it would for anyone. It isn't listed in the sidebar, and it is deleted
+from the agent's own store when you leave it, for another conversation or
+by closing the page (**End private chat** does it on the spot). See
 [docs/REFERENCE.md](docs/REFERENCE.md#private-chats).
 
 ### Several agents at once
