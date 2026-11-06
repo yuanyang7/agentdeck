@@ -48,7 +48,9 @@ const agentLabel = (id) => ui.agents.find((a) => a.id === id)?.label || id;
 const CHAT_MODE = 'chat';
 const chatProject = () => ui.projects.find((p) => p.chat) || null;
 const inChat = () => !ui.ask && !!ui.dir && ui.dir === chatProject()?.dir;
-const subtitleFor = () => (inChat() ? `Not in a project${(ui.key ? ui.isPrivate : ui.private) ? ' · Private' : ''}` : ui.dir || '');
+// Whether what's shown is private: the open chat or group, else the next new one.
+const showingPrivate = () => (ui.key || ui.group ? ui.isPrivate : ui.private);
+const subtitleFor = () => (inChat() ? `Not in a project${showingPrivate() ? ' · Private' : ''}` : ui.dir || '');
 
 // ---------- api ----------
 
@@ -79,7 +81,10 @@ function readHash() {
 function writeHash() {
   const h = new URLSearchParams();
   if (ui.dir) h.set('dir', ui.dir);
-  if (ui.group) h.set('g', ui.group.id);
+  // A private group is never put in the URL, like a private chat.
+  if (ui.group) {
+    if (!ui.group.private) h.set('g', ui.group.id);
+  }
   else if (ui.sessionId && !ui.isPrivate) {
     h.set('a', ui.agent);
     h.set('s', ui.sessionId);
@@ -681,11 +686,12 @@ function renderEmptyState() {
   if (ui.private && inChat() && !several) {
     intro.append('Nothing from earlier chats is ');
     intro.appendChild(el('span', 'empty-project', 'remembered'));
-    intro.append(', and nothing from this one is kept. It isn’t listed in the sidebar and is deleted when you leave it.');
+    intro.append(', and nothing from this one is kept. Your instructions and connectors are left out too. It isn’t listed in the sidebar and is deleted when you leave it.');
   } else if (several) {
     const names = ui.draftAgents.map(agentLabel);
     intro.appendChild(el('span', 'empty-project', `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`));
     intro.append(` each answer in their own conversation, side by side. ${inChat() ? 'They chat' : `In ${folderName(ui.dir || '')} they only read`}; follow-ups go to all of them unless you reply to one.`);
+    if (ui.private && inChat()) intro.append(' Private: none of them gets memory or your instructions, and all of it is deleted when you leave.');
   } else if (ui.ask) {
     intro.append('Describe the task. A quick model call picks the ');
     intro.appendChild(el('span', 'empty-project', 'project'));
@@ -2335,20 +2341,26 @@ $('memory-cancel').addEventListener('click', () => $('memory-dialog').close());
 // for another conversation, a new one, or by closing.
 function renderPrivate() {
   const b = $('private');
-  b.classList.toggle('hidden', !inChat() || !!ui.key || ui.draftAgents.length > 1 || ui.ask);
+  b.classList.toggle('hidden', !inChat() || !!ui.key || !!ui.group || ui.ask);
   b.classList.toggle('on', ui.private);
   b.setAttribute('aria-pressed', String(ui.private));
-  $('end-private').classList.toggle('hidden', !ui.isPrivate || !ui.key);
-  $('memory').classList.toggle('hidden', !inChat() || (ui.key ? ui.isPrivate : ui.private));
+  $('end-private').classList.toggle('hidden', !ui.isPrivate || !(ui.key || ui.group));
+  $('memory').classList.toggle('hidden', !inChat() || showingPrivate());
   // Shown in the same cases, give or take a private chat.
   renderAfterPick();
 }
 
+// The private sessions open now: the chat's, or every member's of a group.
+function privateSessions() {
+  if (!ui.isPrivate) return [];
+  const list = ui.group ? groupMembers().map((m) => ({ agent: m.agent, sessionId: m.sessionId })) : [{ agent: ui.agent, sessionId: ui.sessionId }];
+  return list.filter((x) => x.sessionId).map((x) => ({ ...x, dir: ui.group?.dir || ui.dir }));
+}
+
 function endPrivateChat() {
-  if (!ui.isPrivate) return;
-  const { agent, sessionId, dir } = ui;
+  const open = privateSessions();
   ui.isPrivate = false;
-  if (sessionId) api('/api/private/end', { agent, sessionId, dir }).catch(() => {});
+  for (const x of open) api('/api/private/end', x).catch(() => {});
 }
 
 $('private').addEventListener('click', () => {
@@ -2360,14 +2372,13 @@ $('private').addEventListener('click', () => {
 });
 
 $('end-private').addEventListener('click', () => {
-  if (!confirm('End this private chat? It is deleted now.')) return;
+  if (!confirm(ui.group ? 'End these private chats? They are deleted now.' : 'End this private chat? It is deleted now.')) return;
   newConversation();
 });
 
 // Closing the page ends it too; the request has to outlive the page.
 addEventListener('pagehide', () => {
-  if (!ui.isPrivate || !ui.sessionId) return;
-  navigator.sendBeacon('/api/private/end', new Blob([JSON.stringify({ agent: ui.agent, sessionId: ui.sessionId, dir: ui.dir })], { type: 'application/json' }));
+  for (const x of privateSessions()) navigator.sendBeacon('/api/private/end', new Blob([JSON.stringify(x)], { type: 'application/json' }));
 });
 $('memory-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -3750,6 +3761,7 @@ $('agents-form').addEventListener('submit', (e) => {
   localStorage.setItem('cw_agent', chosen[0]);
   selectAgent(chosen[0]);
   renderAgentPicker();
+  renderPrivate();
   renderEmptyState();
   setRunning(false);
   $('input').focus();
@@ -3825,7 +3837,8 @@ function renderMemberHead(m) {
     h.appendChild(model);
   }
   h.appendChild(state);
-  if (m.sessionId) {
+  // A private member opened on its own would end the group (endPrivateChat).
+  if (m.sessionId && !ui.group.private) {
     const open = el('a', 'col-open', 'Open');
     open.href = `#dir=${encodeURIComponent(ui.group.dir)}&a=${m.agent}&s=${encodeURIComponent(m.sessionId)}`;
     open.title = 'Open this conversation on its own';
@@ -4003,7 +4016,7 @@ async function openGroup(id) {
 // Compare dialog (or the chat's own since); the server forces the group's mode.
 async function sendMember(m, text, images) {
   await api('/api/send', { agent: m.agent, sessionId: m.sessionId, key: m.sessionId ? undefined : m.key, dir: ui.group.dir, text, images,
-    model: m.model || undefined, effort: m.effort || undefined, group: ui.group.id });
+    model: m.model || undefined, effort: m.effort || undefined, group: ui.group.id, private: !m.sessionId && ui.group.private });
   if (!m.running) {
     m.running = true;
     renderMemberHead(m);
@@ -4018,9 +4031,12 @@ async function sendToGroup(text, images) {
   if (isNew) {
     const agents = [...ui.draftAgents];
     const picks = ui.draftPicks || {};
-    ui.group = { id: randomId(), dir: ui.dir, agents, members: agents.map((a) => makeMember(a, 'new-' + randomId(), null, picks[a])), active: agents[0] };
+    const isPrivate = ui.private && inChat();
+    ui.group = { id: randomId(), dir: ui.dir, agents, members: agents.map((a) => makeMember(a, 'new-' + randomId(), null, picks[a])), active: agents[0], private: isPrivate };
+    ui.isPrivate = isPrivate;
     ui.draftAgents = [];
     ui.draftPicks = {};
+    renderPrivate();
     resetView();
     renderGroupView();
     renderAgentPicker();
@@ -4046,6 +4062,8 @@ async function sendToGroup(text, images) {
       // Nothing started: back to the draft, with the agents still picked.
       const agents = group.agents;
       newConversation();
+      ui.private = !!group.private;
+      renderPrivate();
       ui.draftAgents = agents;
       ui.draftPicks = Object.fromEntries(group.members.map((m) => [m.agent, { model: m.model, effort: m.effort }]));
       renderAgentPicker();

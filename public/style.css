@@ -503,7 +503,7 @@ body.stats-open { overflow: hidden; }
 .compare-button:hover, .agents-chip:hover:not(:disabled) { border-color: var(--border); }
 .agents-chip { border-color: var(--accent); font-weight: 650; }
 .agents-chip:disabled { opacity: 1; cursor: default; }
-.composer-options.several select:not(#agent), .composer-options.several .folders-button { display: none; }
+.composer-options.several select:not(#agent), .composer-options.several .folders-button:not(#private) { display: none; }
 .agent-choice { display: flex; align-items: center; gap: 10px; padding: 8px 2px; cursor: pointer; }
 .agent-choice input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 /* Compare: a tier picks a matched model per agent; each row can change it. */
