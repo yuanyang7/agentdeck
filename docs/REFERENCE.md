@@ -660,6 +660,34 @@ nest the same way. A fork has no subagents folder of its own, so the other
 sessions in its project folder are searched for the tool call. Other agents'
 subagents aren't shown.
 
+## Voice input
+
+The microphone button in the composer dictates into the message box. Press
+it, speak, press it again (or just stop talking; Safari and Android end a
+dictation after a pause). Words appear as they are recognised, after
+whatever was already typed, and the message isn't sent until you press
+**Send**, so you can fix a word first. The language follows the browser's
+(`navigator.language`).
+
+The recognition is the browser's own (the Web Speech API), not something
+agentdeck runs: Chrome sends the audio to Google and Safari to Apple, so it
+needs the internet and the words leave your network. Firefox has no speech
+recognition, so it never shows the button. Nothing is recorded or kept by
+agentdeck.
+
+Browsers only open the microphone on a secure page: `https://` or
+`localhost`. Over plain `http://` to the Tailscale address the button
+explains this instead of listening. To get HTTPS on the tailnet, turn on
+**HTTPS Certificates** in the Tailscale admin console, then on the host:
+
+```bash
+tailscale serve --bg --https=443 http://localhost:7878
+```
+
+and open `https://<machine>.<tailnet>.ts.net`. `tailscale serve reset` undoes
+it. The MagicDNS name is already an allowed host (see [Devices](#devices)).
+Don't use `tailscale funnel`, which puts the page on the public internet.
+
 ## Sounds
 
 Two chimes, synthesized in the browser (there's no audio file to load):

@@ -351,6 +351,13 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .composer-actions { display: flex; align-items: center; flex: none; gap: 6px; }
 #attach { border: 0; background: transparent; color: var(--muted); font-size: 22px; width: 35px; height: 35px; padding: 0; line-height: 1; }
 #attach:hover { color: var(--accent); }
+#mic { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 35px; height: 35px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); touch-action: manipulation; transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease-out, color 160ms ease-out; }
+@media (hover: hover) and (pointer: fine) { #mic:hover { color: var(--accent); } }
+#mic:active { transform: scale(.94); }
+#mic[aria-pressed="true"] { color: var(--accent-text); background: var(--accent); }
+#mic[aria-pressed="true"]::before { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--accent); animation: mic-ring 1.4s cubic-bezier(0.23, 1, 0.32, 1) infinite; pointer-events: none; }
+@keyframes mic-ring { from { transform: scale(1); opacity: .7; } to { transform: scale(1.8); opacity: 0; } }
+.voice-note { padding: 6px 4px 8px; color: var(--danger); font-size: 12px; line-height: 1.4; }
 #send, #stop { min-height: 35px; padding: 6px 13px; font-size: 12px; }
 #send span { margin-left: 6px; }
 .composer.drag textarea, .composer.drag .composer-row { border-color: var(--accent); }
