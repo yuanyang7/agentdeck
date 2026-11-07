@@ -805,6 +805,17 @@ function hostFile(src) {
 
 const downloadUrl = (file) => '/api/file?download=1&path=' + encodeURIComponent(file);
 
+// Images a reply links to or attaches open in the image viewer rather than
+// downloading, which on a phone means leaving the chat to find the file.
+const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+function viewInstead(a, file) {
+  a.addEventListener('click', (e) => {
+    if (!a.hasAttribute('href') || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+    openImage(hostFile(file));
+  });
+}
+
 DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
   if (/^(IMG|VIDEO|AUDIO|SOURCE)$/.test(node.nodeName) && data.attrName === 'src') data.attrValue = hostFile(data.attrValue.trim());
   if (node.nodeName === 'A' && data.attrName === 'href') {
@@ -854,7 +865,9 @@ function attachmentCard(raw, streaming) {
   const size = el('span', 'reply-file-size', '…');
   meta.append(size, ' · ', shortFolder(folder));
   body.append(el('span', 'reply-file-name', name), meta);
-  a.append(body, el('span', 'reply-file-action', 'Download'));
+  const image = IMAGE_FILE.test(name);
+  a.append(body, el('span', 'reply-file-action', image ? 'View' : 'Download'));
+  if (image) viewInstead(a, file);
   if (!streaming) {
     fetch(a.href, { method: 'HEAD' })
       .then((r) => {
@@ -1289,6 +1302,10 @@ function renderItem(item, streaming) {
         code.parentElement.replaceWith(chip);
       }
       addAttachments(d, streaming);
+      for (const a of d.querySelectorAll('a[download]:not(.reply-file)')) {
+        const file = new URL(a.href, location.href).searchParams.get('path') || '';
+        if (IMAGE_FILE.test(file)) viewInstead(a, file);
+      }
       for (const img of d.querySelectorAll('img')) {
         // ![demo](clip.mp4) and ![voice](take.mp3) play inline.
         const kind = mediaKind(img.getAttribute('src') || '');
