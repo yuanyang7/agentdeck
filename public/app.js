@@ -892,7 +892,17 @@ function addAttachments(root, streaming) {
     const paths = [...new Set(code.textContent.split('\n').map((l) => l.trim()).filter(Boolean))].slice(0, ATTACH_MAX);
     for (const p of paths) {
       const card = attachmentCard(p, streaming);
-      if (card) list.appendChild(card);
+      if (!card) continue;
+      // Attached videos and audio play right here, with the card under the
+      // player still there to download the file. Not while the reply is
+      // streaming, or the player would be rebuilt every frame.
+      const src = hostFile(new URL(card.href, location.href).searchParams.get('path') || '');
+      const kind = mediaKind(src);
+      if (kind !== 'image' && !streaming) {
+        const media = el('div', 'reply-media');
+        media.append(playerEl(kind, src, (pl) => pl.remove()), card);
+        list.appendChild(media);
+      } else list.appendChild(card);
     }
     if (list.children.length) code.parentElement.replaceWith(list);
   }
@@ -949,6 +959,28 @@ function addMentionedImages(root) {
   for (const [block, images] of byBlock) {
     const row = imageRow(images, { quiet: true });
     row.classList.add('mentioned');
+    if (block === root || block.matches('li, td, th, blockquote')) block.appendChild(row);
+    else block.after(row);
+  }
+}
+
+// Videos and audio a reply links to, on the host ([demo](out/demo.mp4)) or
+// on the web (https://…/clip.webm), get a player under the paragraph or list
+// item with the link, so they play in the chat instead of downloading. The
+// link itself still downloads or opens the file.
+function addLinkedPlayers(root) {
+  const seen = new Set([...root.querySelectorAll('video, audio')].map((m) => m.getAttribute('src')));
+  for (const a of root.querySelectorAll('a[href]:not(.reply-file)')) {
+    const u = new URL(a.href, location.href);
+    let src;
+    if (u.origin === location.origin && u.pathname === '/api/file') src = hostFile(u.searchParams.get('path') || '');
+    else if (/^https?:$/.test(u.protocol) && u.origin !== location.origin) src = u.href;
+    const kind = src && mediaKind(src);
+    if (!kind || kind === 'image' || seen.has(src) || seen.size >= MAX_MENTIONED) continue;
+    seen.add(src);
+    const row = el('div', 'msg-images mentioned');
+    row.appendChild(playerEl(kind, src, () => row.remove()));
+    const block = a.closest('li, p, td, th, h1, h2, h3, h4, h5, h6, blockquote') || root;
     if (block === root || block.matches('li, td, th, blockquote')) block.appendChild(row);
     else block.after(row);
   }
@@ -1306,6 +1338,7 @@ function renderItem(item, streaming) {
         const file = new URL(a.href, location.href).searchParams.get('path') || '';
         if (IMAGE_FILE.test(file)) viewInstead(a, file);
       }
+      if (!streaming) addLinkedPlayers(d);
       for (const img of d.querySelectorAll('img')) {
         // ![demo](clip.mp4) and ![voice](take.mp3) play inline.
         const kind = mediaKind(img.getAttribute('src') || '');
