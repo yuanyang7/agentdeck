@@ -120,8 +120,10 @@ to see what decided it. Chats in **Chat** have no stage. See
 
 ### Images
 
-Attach up to 10 images to a message — click 📎, paste, or drag files onto the
-composer — and images the agent shares back (screenshots, tool output,
+Attach up to 10 images to a message — click ＋, paste, or drag files onto the
+composer. Tap an attached image to mark it up before sending: draw, box an
+area, add arrows and text labels, so the agent sees what you mean. Images the
+agent shares back (screenshots, tool output,
 generated images) appear inline too, loaded from the host so every device
 sees them. Click any image to view it full size. Videos (MP4, MOV, WebM)
 and audio (MP3, M4A, WAV, Ogg, FLAC) the agent links, names or returns from

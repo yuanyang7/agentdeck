@@ -366,8 +366,15 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .composer.drag textarea, .composer.drag .composer-row { border-color: var(--accent); }
 .attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; }
 .attachment { position: relative; }
+.attachment-open { display: block; position: relative; padding: 0; border: 0; background: none; border-radius: 8px; cursor: pointer; touch-action: manipulation; }
+.attachment-open:active:not(:disabled) { transform: scale(0.97); }
 .attachment img { display: block; height: 64px; max-width: 120px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
-.attachment button { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; padding: 0; border-radius: 50%; line-height: 1; font-size: 12px; }
+@media (hover: hover) and (pointer: fine) { .attachment-open:hover img { border-color: var(--accent); } }
+/* Always shown, so a phone user can tell the thumbnail opens the editor;
+   filled once the image carries marks. */
+.attachment-mark { position: absolute; left: 4px; bottom: 4px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(20, 24, 36, .62); color: #fff; pointer-events: none; }
+.attachment-mark.marked { background: var(--accent); color: var(--accent-text); }
+.attachment-remove { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; padding: 0; border-radius: 50%; line-height: 1; font-size: 12px; }
 
 /* Usage and tags */
 .usage { padding: 14px max(28px, calc((100% - 880px) / 2)); border-bottom: 1px solid var(--border); background: var(--card); font-size: 12px; }
@@ -656,6 +663,36 @@ body.stats-open { overflow: hidden; }
   .image-viewer-bar button:hover { background: rgba(255, 255, 255, .22); }
 }
 .image-viewer-bar button:active { transform: scale(0.97); }
+/* Marking up an attachment: the image on the viewer's dark backdrop, Cancel
+   and Done on top, tools within thumb reach at the bottom. */
+.markup { border: 0; padding: 0; margin: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; background: #10131c; color: #f0f2f9; display: none; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); overflow: hidden; overscroll-behavior: contain; }
+.markup[open] { display: grid; animation: viewer-in 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+.markup::backdrop { background: #10131c; }
+.markup button { touch-action: manipulation; }
+.markup button:focus-visible { outline: 2px solid #f0f2f9; outline-offset: 2px; }
+.markup-top { display: flex; align-items: center; gap: 8px; padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); }
+.markup-hint { flex: 1; min-width: 0; text-align: center; font-size: 13px; color: #a3abc0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.markup-top-actions { display: flex; align-items: center; gap: 4px; }
+.markup-text-btn, .markup-icon-btn { min-height: 44px; border: 0; background: transparent; color: #f0f2f9; border-radius: 10px; }
+.markup-text-btn { padding: 8px 12px; font-size: 15px; }
+.markup-icon-btn { width: 44px; padding: 0; display: grid; place-items: center; }
+.markup-done { min-height: 44px; padding: 8px 18px; font-size: 15px; margin-left: 4px; }
+.markup-stage { position: relative; min-height: 0; display: grid; place-items: center; overflow: hidden; }
+.markup-stage canvas { display: block; border-radius: 4px; touch-action: none; cursor: crosshair; background: #fff; }
+.markup-text-input { position: absolute; transform: translateY(-50%); padding: 2px 4px; margin-left: -4px; border: 1px dashed rgba(240, 242, 249, .7); border-radius: 4px; background: rgba(10, 12, 20, .35); font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.2; outline: none; }
+.markup-tools { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 24px; padding: 10px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+.markup-group { display: flex; align-items: center; gap: 4px; }
+.markup-tool { width: 48px; height: 44px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 10px; background: transparent; color: #c9cede; }
+.markup-tool[aria-pressed="true"] { background: rgba(255, 255, 255, .16); color: #fff; }
+.markup-color { width: 44px; height: 44px; padding: 0; border: 0; background: transparent; display: grid; place-items: center; border-radius: 50%; }
+.markup-color::before { content: ""; width: 24px; height: 24px; border-radius: 50%; background: var(--swatch); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .35); transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.markup-color[aria-pressed="true"]::before { transform: scale(1.15); box-shadow: 0 0 0 2px #10131c, 0 0 0 4px #f0f2f9; }
+.markup button:disabled { opacity: .35; }
+@media (hover: hover) and (pointer: fine) {
+  .markup-text-btn:hover:not(:disabled), .markup-icon-btn:hover:not(:disabled), .markup-tool:hover { background: rgba(255, 255, 255, .1); }
+}
+.markup-text-btn:active:not(:disabled), .markup-icon-btn:active:not(:disabled), .markup-tool:active, .markup-color:active { transform: scale(0.97); }
+@media (max-width: 420px) { .markup-text-btn { padding: 8px; } .markup-hint { font-size: 12px; } }
 @keyframes viewer-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
