@@ -153,6 +153,31 @@
     </div>
   </dialog>
 
+  <dialog id="markup" class="markup" aria-label="Mark up image">
+    <div class="markup-top">
+      <button type="button" id="markup-cancel" class="markup-text-btn">Cancel</button>
+      <span id="markup-hint" class="markup-hint"></span>
+      <div class="markup-top-actions">
+        <button type="button" id="markup-undo" class="markup-icon-btn" aria-label="Undo" title="Undo (⌘Z)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+        <button type="button" id="markup-clear" class="markup-text-btn">Clear all</button>
+        <button type="button" id="markup-done" class="primary markup-done">Done</button>
+      </div>
+    </div>
+    <div id="markup-stage" class="markup-stage">
+      <canvas id="markup-canvas"></canvas>
+      <input id="markup-text" class="markup-text-input hidden" type="text" maxlength="80" autocomplete="off" enterkeyhint="done" aria-label="Label text">
+    </div>
+    <div class="markup-tools">
+      <div class="markup-group" role="group" aria-label="Tool">
+        <button type="button" class="markup-tool" data-tool="pen" aria-label="Pen" title="Pen (P)"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20c2.5-.2 4-1.2 5.2-2.4L19 7.8a2.1 2.1 0 0 0-3-3L6.2 14.6C5 15.8 4.2 17.4 4 20Z"/><path d="m14.5 6.3 3.2 3.2"/></svg></button>
+        <button type="button" class="markup-tool" data-tool="box" aria-label="Box" title="Box (B)"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5.5" width="16" height="13" rx="1.5"/></svg></button>
+        <button type="button" class="markup-tool" data-tool="arrow" aria-label="Arrow" title="Arrow (A)"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19 19 5"/><path d="M10 5h9v9"/></svg></button>
+        <button type="button" class="markup-tool" data-tool="text" aria-label="Text" title="Text (T)"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 6.5V5h14v1.5M12 5v14M9 19h6"/></svg></button>
+      </div>
+      <div id="markup-colors" class="markup-group" role="group" aria-label="Colour"></div>
+    </div>
+  </dialog>
+
   <dialog id="tag-dialog" class="tag-dialog">
     <form method="dialog" id="tag-form">
       <h2>Tags</h2>

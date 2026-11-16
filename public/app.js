@@ -2811,9 +2811,13 @@ document.addEventListener('pointerdown', (e) => {
 const MAX_EDGE = 1568; // larger images are downscaled; the API resizes them anyway
 const MAX_BYTES = 3 * 1024 * 1024;
 const MAX_ATTACH = 10;
-const attachments = []; // { mediaType, data (base64), url }
+// { mediaType, data (base64) }, plus, once marked up, `original` (the image
+// before any marks) and `marks` (so the marks stay editable).
+const attachments = [];
 
 const dataUrl = (img) => `data:${img.mediaType};base64,${img.data}`;
+
+const PEN_ICON = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20c2.5-.2 4-1.2 5.2-2.4L19 7.8a2.1 2.1 0 0 0-3-3L6.2 14.6C5 15.8 4.2 17.4 4 20Z"/></svg>';
 
 function renderAttachments() {
   const box = $('attachments');
@@ -2821,19 +2825,388 @@ function renderAttachments() {
   box.classList.toggle('hidden', !attachments.length);
   attachments.forEach((a, i) => {
     const wrap = el('div', 'attachment');
+    const open = el('button', 'attachment-open');
+    open.type = 'button';
+    const marked = !!a.marks?.length;
+    open.title = marked ? 'Edit marks' : 'Mark up';
+    open.setAttribute('aria-label', `${marked ? 'Edit marks on' : 'Mark up'} image ${i + 1}`);
     const img = el('img');
     img.src = dataUrl(a);
-    const rm = el('button', '', '×');
+    img.alt = '';
+    const chip = el('span', 'attachment-mark' + (marked ? ' marked' : ''));
+    chip.innerHTML = PEN_ICON;
+    open.append(img, chip);
+    open.addEventListener('click', () => openMarkup(a));
+    const rm = el('button', 'attachment-remove', '×');
     rm.type = 'button';
     rm.title = 'Remove';
+    rm.setAttribute('aria-label', `Remove image ${i + 1}`);
     rm.addEventListener('click', () => {
       attachments.splice(i, 1);
       renderAttachments();
     });
-    wrap.append(img, rm);
+    wrap.append(open, rm);
     box.appendChild(wrap);
   });
 }
+
+// ---------- marking up an attached image ----------
+// Marks are kept as shapes in the image's own pixels and drawn over it on a
+// canvas; Done flattens them into the attachment, keeping the original and
+// the shapes so the marks can be edited again before sending.
+
+const MARK_COLORS = [
+  { name: 'Red', value: '#f03e3e' },
+  { name: 'Yellow', value: '#ffd43b' },
+  { name: 'Blue', value: '#2f80ed' },
+  { name: 'White', value: '#ffffff' },
+  { name: 'Black', value: '#1b1e28' },
+];
+const MARK_HINTS = {
+  pen: 'Drag to draw',
+  box: 'Drag to frame an area',
+  arrow: 'Drag from the tail to the tip',
+  text: 'Tap where the label goes',
+};
+const mk = {
+  tool: 'pen',
+  color: MARK_COLORS[0].value,
+  target: null, // the attachment being marked up
+  base: null, // its original image, decoded
+  marks: [],
+  start: [], // `marks` as the editor opened, to tell whether anything changed
+  history: [], // earlier `marks` arrays, for Undo
+  draft: null, // the shape being drawn
+  pointer: null,
+  textAt: null, // where a label being typed goes, in image pixels
+  frame: 0,
+};
+const mkCanvas = $('markup-canvas');
+const mkCtx = mkCanvas.getContext('2d');
+
+// Stroke width and label size follow the image, so marks look the same on a
+// phone screenshot and a large one, but never get thinner or smaller on
+// screen than is comfortable to see while drawing (a label at least the 16px
+// its text box needs, so what you type is the size it comes out).
+const shownScale = () => mkCanvas.getBoundingClientRect().width / mkCanvas.width || 1;
+const markWidth = () => Math.max(3, Math.round(Math.max(mkCanvas.width, mkCanvas.height) / 260), Math.round(2.5 / shownScale()));
+const labelSize = () => Math.max(16, Math.round(Math.max(mkCanvas.width, mkCanvas.height) / 34), Math.ceil(16 / shownScale()));
+// The thin outline that keeps a mark readable on light and dark images.
+const haloFor = (color) => (color === '#ffffff' || color === '#ffd43b' ? 'rgba(20, 22, 30, .55)' : 'rgba(255, 255, 255, .75)');
+
+function tracePen(ctx, pts) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  if (pts.length === 1) ctx.lineTo(pts[0].x + 0.01, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mid = { x: (pts[i].x + pts[i + 1].x) / 2, y: (pts[i].y + pts[i + 1].y) / 2 };
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mid.x, mid.y);
+  }
+  if (pts.length > 1) ctx.lineTo(pts.at(-1).x, pts.at(-1).y);
+}
+
+function traceArrow(ctx, m) {
+  const ang = Math.atan2(m.y1 - m.y0, m.x1 - m.x0);
+  const head = Math.min(m.w * 4.5, Math.hypot(m.x1 - m.x0, m.y1 - m.y0) * 0.6);
+  ctx.beginPath();
+  ctx.moveTo(m.x0, m.y0);
+  ctx.lineTo(m.x1, m.y1);
+  for (const side of [-1, 1]) {
+    ctx.moveTo(m.x1, m.y1);
+    ctx.lineTo(m.x1 - head * Math.cos(ang + side * 0.5), m.y1 - head * Math.sin(ang + side * 0.5));
+  }
+}
+
+function drawMark(ctx, m) {
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (m.type === 'text') {
+    ctx.font = `700 ${m.size}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = Math.max(3, m.size / 5);
+    ctx.strokeStyle = haloFor(m.color);
+    ctx.strokeText(m.text, m.x, m.y);
+    ctx.fillStyle = m.color;
+    ctx.fillText(m.text, m.x, m.y);
+    return;
+  }
+  const trace = () => {
+    if (m.type === 'pen') tracePen(ctx, m.pts);
+    else if (m.type === 'arrow') traceArrow(ctx, m);
+    else {
+      ctx.beginPath();
+      ctx.roundRect(Math.min(m.x0, m.x1), Math.min(m.y0, m.y1), Math.abs(m.x1 - m.x0), Math.abs(m.y1 - m.y0), m.w);
+    }
+  };
+  trace();
+  ctx.strokeStyle = haloFor(m.color);
+  ctx.lineWidth = m.w + Math.max(2, m.w * 0.7);
+  ctx.stroke();
+  ctx.strokeStyle = m.color;
+  ctx.lineWidth = m.w;
+  ctx.stroke();
+}
+
+function renderMarks(ctx, marks) {
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.drawImage(mk.base, 0, 0, ctx.canvas.width, ctx.canvas.height);
+  for (const m of marks) drawMark(ctx, m);
+}
+
+function redrawMarkup() {
+  cancelAnimationFrame(mk.frame);
+  mk.frame = requestAnimationFrame(() => renderMarks(mkCtx, mk.draft ? [...mk.marks, mk.draft] : mk.marks));
+}
+
+function syncMarkupControls() {
+  $('markup-undo').disabled = !mk.history.length;
+  $('markup-clear').disabled = !mk.marks.length;
+  $('markup-hint').textContent = MARK_HINTS[mk.tool];
+  for (const b of document.querySelectorAll('.markup-tool')) b.setAttribute('aria-pressed', String(b.dataset.tool === mk.tool));
+  for (const b of $('markup-colors').children) b.setAttribute('aria-pressed', String(b.dataset.color === mk.color));
+}
+
+function commitMarks(next) {
+  mk.history.push(mk.marks);
+  mk.marks = next;
+  syncMarkupControls();
+  redrawMarkup();
+}
+
+// Sizes the canvas on screen to fit the space between the two bars.
+function fitMarkupCanvas() {
+  const stage = $('markup-stage');
+  const scale = Math.min(1, (stage.clientWidth - 16) / mkCanvas.width, (stage.clientHeight - 16) / mkCanvas.height);
+  mkCanvas.style.width = `${Math.max(1, Math.floor(mkCanvas.width * scale))}px`;
+  mkCanvas.style.height = `${Math.max(1, Math.floor(mkCanvas.height * scale))}px`;
+  if (mk.textAt) placeTextInput();
+}
+new ResizeObserver(() => $('markup').open && fitMarkupCanvas()).observe($('markup-stage'));
+
+function toImagePoint(e) {
+  const r = mkCanvas.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(mkCanvas.width, ((e.clientX - r.left) / r.width) * mkCanvas.width)),
+    y: Math.max(0, Math.min(mkCanvas.height, ((e.clientY - r.top) / r.height) * mkCanvas.height)),
+  };
+}
+
+async function openMarkup(att) {
+  const src = att.original || att;
+  const img = new Image();
+  img.src = dataUrl(src);
+  try {
+    await img.decode();
+  } catch {
+    alert("Couldn't open that image for marking up.");
+    return;
+  }
+  const marks = att.marks ? [...att.marks] : [];
+  Object.assign(mk, { target: att, base: img, marks, start: marks, history: [], draft: null, pointer: null });
+  mkCanvas.width = img.naturalWidth;
+  mkCanvas.height = img.naturalHeight;
+  closeTextInput(false);
+  $('markup').showModal();
+  fitMarkupCanvas();
+  syncMarkupControls();
+  renderMarks(mkCtx, mk.marks);
+  document.querySelector(`.markup-tool[data-tool="${mk.tool}"]`).focus();
+}
+
+const markupChanged = () => mk.marks !== mk.start;
+
+function cancelMarkup() {
+  if (markupChanged() && !confirm('Discard the changes to your marks?')) return;
+  $('markup').close();
+}
+
+// Flattens the marks into the attachment. A JPEG stays a JPEG; anything else
+// becomes a PNG unless that would be too large to send.
+async function finishMarkup() {
+  closeTextInput(true);
+  const att = mk.target;
+  const original = att.original || { mediaType: att.mediaType, data: att.data };
+  if (!mk.marks.length) {
+    Object.assign(att, original);
+    delete att.original;
+    delete att.marks;
+  } else {
+    $('markup-done').disabled = true;
+    try {
+      const out = document.createElement('canvas');
+      out.width = mkCanvas.width;
+      out.height = mkCanvas.height;
+      const ctx = out.getContext('2d');
+      let type = original.mediaType === 'image/jpeg' ? 'image/jpeg' : 'image/png';
+      const encode = async (t) => {
+        if (t === 'image/jpeg') {
+          ctx.fillStyle = '#fff'; // JPEG has no transparency
+          ctx.fillRect(0, 0, out.width, out.height);
+          ctx.drawImage(mk.base, 0, 0);
+          for (const m of mk.marks) drawMark(ctx, m);
+        } else renderMarks(ctx, mk.marks);
+        const blob = await new Promise((resolve) => out.toBlob(resolve, t, 0.9));
+        if (!blob) throw new Error("Couldn't save the marked-up image.");
+        return blob;
+      };
+      let blob = await encode(type);
+      if (blob.size > MAX_BYTES && type === 'image/png') blob = await encode((type = 'image/jpeg'));
+      Object.assign(att, { mediaType: type, data: (await readAsDataUrl(blob)).split(',')[1], original, marks: mk.marks });
+    } catch (err) {
+      alert(err.message);
+      return;
+    } finally {
+      $('markup-done').disabled = false;
+    }
+  }
+  $('markup').close();
+  renderAttachments();
+}
+
+// ----- labels: an input over the image where the label will be drawn -----
+
+function placeTextInput() {
+  const t = $('markup-text');
+  const r = mkCanvas.getBoundingClientRect();
+  const s = $('markup-stage').getBoundingClientRect();
+  const k = r.width / mkCanvas.width;
+  const left = r.left - s.left + mk.textAt.x * k;
+  t.style.fontSize = `${labelSize() * k}px`; // at least 16px, which keeps iOS from zooming
+  t.style.color = mk.color;
+  t.style.left = `${left}px`;
+  t.style.top = `${r.top - s.top + mk.textAt.y * k}px`;
+  // Stays inside the stage: a box past its edge would scroll the editor.
+  t.style.width = `${Math.max(48, Math.min(s.width * 0.6, s.width - left - 8))}px`;
+}
+
+function openTextInput(at) {
+  mk.textAt = at;
+  const t = $('markup-text');
+  t.value = '';
+  t.classList.remove('hidden');
+  placeTextInput();
+  t.focus({ preventScroll: true });
+}
+
+function closeTextInput(commit) {
+  const t = $('markup-text');
+  const at = mk.textAt;
+  mk.textAt = null;
+  t.classList.add('hidden');
+  const text = t.value.trim();
+  t.value = '';
+  if (commit && at && text) commitMarks([...mk.marks, { type: 'text', color: mk.color, x: at.x, y: at.y, size: labelSize(), text }]);
+}
+
+$('markup-text').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing) {
+    e.preventDefault();
+    closeTextInput(true);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closeTextInput(false);
+  }
+});
+$('markup-text').addEventListener('blur', () => closeTextInput(true));
+
+// ----- drawing -----
+
+mkCanvas.addEventListener('pointerdown', (e) => {
+  if (mk.pointer !== null || e.button > 0) return;
+  e.preventDefault();
+  if (mk.textAt) {
+    closeTextInput(true);
+    return;
+  }
+  const p = toImagePoint(e);
+  if (mk.tool === 'text') {
+    openTextInput(p);
+    return;
+  }
+  mk.pointer = e.pointerId;
+  mkCanvas.setPointerCapture(e.pointerId);
+  const w = markWidth();
+  mk.draft = mk.tool === 'pen' ? { type: 'pen', color: mk.color, w, pts: [p] } : { type: mk.tool, color: mk.color, w, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+  redrawMarkup();
+});
+mkCanvas.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== mk.pointer || !mk.draft) return;
+  const events = e.getCoalescedEvents?.() || [e];
+  if (mk.draft.type === 'pen') for (const ce of events) mk.draft.pts.push(toImagePoint(ce));
+  else Object.assign(mk.draft, (({ x, y }) => ({ x1: x, y1: y }))(toImagePoint(e)));
+  redrawMarkup();
+});
+function endStroke(e) {
+  if (e.pointerId !== mk.pointer) return;
+  mk.pointer = null;
+  const d = mk.draft;
+  mk.draft = null;
+  if (!d) return;
+  // A box or arrow too small to see is a stray tap; a tap with the pen is a dot.
+  const k = mkCanvas.width / mkCanvas.getBoundingClientRect().width;
+  if (e.type === 'pointercancel' || (d.type !== 'pen' && Math.hypot(d.x1 - d.x0, d.y1 - d.y0) < 6 * k)) redrawMarkup();
+  else commitMarks([...mk.marks, d]);
+}
+mkCanvas.addEventListener('pointerup', endStroke);
+mkCanvas.addEventListener('pointercancel', endStroke);
+
+// ----- controls -----
+
+for (const c of MARK_COLORS) {
+  const b = el('button', 'markup-color');
+  b.type = 'button';
+  b.dataset.color = c.value;
+  b.style.setProperty('--swatch', c.value);
+  b.setAttribute('aria-label', c.name);
+  b.title = c.name;
+  $('markup-colors').appendChild(b);
+}
+$('markup-colors').addEventListener('click', (e) => {
+  const b = e.target.closest('.markup-color');
+  if (!b) return;
+  mk.color = b.dataset.color;
+  syncMarkupControls();
+});
+for (const b of document.querySelectorAll('.markup-tool')) {
+  b.addEventListener('click', () => {
+    closeTextInput(true);
+    mk.tool = b.dataset.tool;
+    syncMarkupControls();
+  });
+}
+$('markup-undo').addEventListener('click', () => {
+  if (!mk.history.length) return;
+  mk.marks = mk.history.pop();
+  syncMarkupControls();
+  redrawMarkup();
+});
+$('markup-clear').addEventListener('click', () => {
+  closeTextInput(false);
+  if (mk.marks.length) commitMarks([]); // Undo brings them back
+});
+$('markup-cancel').addEventListener('click', cancelMarkup);
+$('markup-done').addEventListener('click', finishMarkup);
+$('markup').addEventListener('cancel', (e) => {
+  e.preventDefault(); // Escape asks before throwing marks away
+  cancelMarkup();
+});
+$('markup').addEventListener('close', () => {
+  cancelAnimationFrame(mk.frame);
+  closeTextInput(false);
+  Object.assign(mk, { target: null, base: null, marks: [], history: [], draft: null, pointer: null });
+});
+$('markup').addEventListener('keydown', (e) => {
+  if (e.target === $('markup-text')) return;
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+    e.preventDefault();
+    $('markup-undo').click();
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const tool = { p: 'pen', b: 'box', a: 'arrow', t: 'text' }[e.key.toLowerCase()];
+  if (tool) document.querySelector(`.markup-tool[data-tool="${tool}"]`).click();
+});
 
 function readAsDataUrl(blob) {
   return new Promise((resolve, reject) => {

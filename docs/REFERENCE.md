@@ -628,6 +628,21 @@ write to `/tmp` anyway.
   under the tool card. A `.webm` always gets a video player, even when it only
   holds audio.
 
+### Marking up an image before sending
+
+Tap or click an attached image's thumbnail in the composer to mark it up.
+The editor has four tools, Pen, Box, Arrow and Text (keys P, B, A, T), and
+five colours. Every mark gets a thin contrasting outline, so it stays
+readable on light and dark screenshots. Undo (⌘Z / Ctrl+Z) steps back one
+mark, and Clear all removes every mark (Undo brings them back). For a
+label, tap where it goes, type, and press Enter. Done draws the marks
+into the image that gets sent; Cancel or Escape leaves it as it was, asking
+first if marks would be lost. A JPEG stays a JPEG; other images become PNGs,
+or JPEGs if a PNG would be over 3 MB. The original and the marks are kept
+with the attachment until it's sent, so reopening it lets you undo or add
+marks, and a thumbnail with marks shows a filled pen badge. Marking up happens
+entirely in the browser, so it works the same with every agent.
+
 Larger images are downscaled in the browser before upload. The server only
 serves files with an image extension (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP;
 up to 50 MB), a video extension (MP4, M4V, MOV, WebM) or an audio extension
