@@ -148,6 +148,11 @@ A Claude Code turn that ends on a plan limit pauses the chat instead of
 ending it. The limit is recognized by the reply's `rate_limit` error, or a
 result that failed with HTTP 429 or says "You've hit your … limit".
 
+- A limit hit while the turn waits on background work (a task finishes
+  and the reply to it is the limit) ends the turn at once and pauses the
+  chat. Background tasks still running are stopped with it: a subagent
+  would fail on the same limit anyway, and nothing can reply to the others
+  until the reset.
 - The chat continues one minute after the reset, and never sooner than five
   minutes after hitting the limit. The reset time comes from the CLI's
   `rate_limit_event`. That event doesn't always come, so the next source is
