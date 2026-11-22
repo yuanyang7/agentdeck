@@ -1301,9 +1301,82 @@ function dismissMoveOffers(key) {
   for (const card of [...$('action-results').children]) if (String(card.actionId).startsWith(`move-offer:${key}:`)) card.remove();
 }
 
+// ---------- message times ----------
+
+// "2:41 PM" today, "Yesterday 2:41 PM", "Mon 2:41 PM" this week, else
+// "Nov 3, 2:41 PM" (with the year when it isn't this one).
+function clockLabel(at) {
+  const when = new Date(at);
+  const time = when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const day = (d) => new Date(d).setHours(0, 0, 0, 0);
+  const days = Math.round((day(Date.now()) - day(at)) / 86_400_000);
+  if (days <= 0) return time;
+  if (days === 1) return `Yesterday ${time}`;
+  if (days < 7) return `${when.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+  const sameYear = when.getFullYear() === new Date().getFullYear();
+  return `${when.toLocaleDateString([], sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' })}, ${time}`;
+}
+
+// "12 s", "4 min", "1 h 20 min".
+function spanLabel(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} s`;
+  const min = Math.round(s / 60);
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  return `${h} h${min % 60 ? ` ${min % 60} min` : ''}`;
+}
+
+// A <time> showing `text`, with the full date and time on hover.
+function timeEl(cls, at, text) {
+  const t = el('time', cls, text);
+  t.dateTime = new Date(at).toISOString();
+  t.title = new Date(at).toLocaleString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return t;
+}
+
+// Under each finished turn: when the agent's last step came and how long the
+// turn took from the message that started it. Redrawn from the page's own
+// order, as a draft replaced by its final text keeps the draft's place.
+let turnTimesRaf = 0;
+function scheduleTurnTimes() {
+  turnTimesRaf ||= requestAnimationFrame(() => {
+    turnTimesRaf = 0;
+    drawTurnTimes();
+  });
+}
+
+function drawTurnTimes() {
+  const box = $('messages');
+  const stick = nearBottom();
+  for (const n of box.querySelectorAll(':scope > .turn-time')) n.remove();
+  const itemOf = new Map([...ui.els].map(([id, node]) => [node, ui.items.get(id)]));
+  let start = null; // the user item that began the turn
+  let last = null; // { item, node } of its latest timed step
+  const close = () => {
+    if (!start?.at || !last) return;
+    const took = last.item.at - start.at;
+    const text = clockLabel(last.item.at) + (took >= 1000 ? ` · took ${spanLabel(took)}` : '');
+    last.node.after(timeEl('turn-time', last.item.at, text));
+  };
+  for (const node of [...box.children]) {
+    const item = itemOf.get(node);
+    if (!item) continue;
+    if (item.kind === 'user') {
+      close();
+      start = item;
+      last = null;
+    } else if (item.at && start) {
+      last = { item, node };
+    }
+  }
+  if (!ui.running) close();
+  if (stick) scrollToBottom(true);
+}
+
 // A user bubble: optional image thumbnails and text, with a fork control
-// beside it.
-function userBubble(id, text, images) {
+// beside it and the time it was sent under it.
+function userBubble(id, text, images, at) {
   const d = el('div', 'msg-user');
   if (images.length) d.appendChild(imageRow(images));
   if (text) d.appendChild(el('div', 'msg-text', text));
@@ -1314,6 +1387,7 @@ function userBubble(id, text, images) {
   fork.setAttribute('aria-label', 'Fork the conversation from this message');
   fork.onclick = () => forkFrom(id, fork);
   row.append(fork, d);
+  if (at) row.appendChild(timeEl('msg-time', at, clockLabel(at)));
   return row;
 }
 
@@ -1323,7 +1397,7 @@ const TOOL_STATE = { running: '…', done: 'done', error: 'error' };
 function renderItem(item, streaming) {
   switch (item.kind) {
     case 'user':
-      return userBubble(item.id, item.text || '', item.images || []);
+      return userBubble(item.id, item.text || '', item.images || [], item.at);
     case 'text': {
       const d = el('div', 'msg-assistant');
       d.innerHTML = md(item.text);
@@ -1469,7 +1543,11 @@ async function loadSubagent(item) {
 // Adds an item, or merges it into the one with the same id and redraws that
 // in place. `replaces` swaps out an earlier item (a streamed draft).
 function upsert(patch, streaming) {
-  const item = { ...ui.items.get(patch.id), ...patch };
+  const prev = ui.items.get(patch.id);
+  const item = { ...prev, ...patch };
+  // The first time an item got is kept (see lib/items.mjs).
+  const at = prev?.at ?? (patch.replaces && ui.items.get(patch.replaces)?.at) ?? patch.at;
+  if (at) item.at = at;
   let old = ui.els.get(item.id);
   if (item.replaces) {
     // The draft may not be drawn yet (its frame is still pending); forgetting
@@ -1494,13 +1572,14 @@ function upsert(patch, streaming) {
     append(node);
   }
   ui.els.set(item.id, node);
+  if (!streaming) scheduleTurnTimes();
 }
 
 // Streamed text is applied at most once per frame.
 const dirty = new Set();
 let deltaRaf = 0;
 function applyDelta(id, text) {
-  const item = ui.items.get(id) || { id, kind: 'text', text: '' };
+  const item = ui.items.get(id) || { id, kind: 'text', text: '', at: Date.now() };
   item.text = (item.text || '') + text;
   ui.items.set(id, item);
   dirty.add(id);
@@ -1580,6 +1659,7 @@ function composerPlaceholder(running, queues) {
 }
 
 function setRunning(running) {
+  if (ui.running !== running) scheduleTurnTimes();
   ui.running = running;
   if (!running) ui.waiting = false;
   // While a turn runs, sending queues the message for after it; once its
