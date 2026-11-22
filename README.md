@@ -181,6 +181,17 @@ same conversation open here and in a terminal, desktop app, opencode TUI or Anti
 at the same time — each keeps its own copy in memory and won't see the
 other's messages.
 
+### Context
+
+A small ring beside the attach button shows how full the open chat's
+context is: the share of the model's context window its last reply used,
+amber from 70% and red from 90%. Click it to see the token counts instead
+("156k / 1M"); hover for the exact numbers. It updates as the agent works.
+Claude Code and Codex chats show it, opened from here or not. A Claude Code
+chat shows only the token count until a turn with its model has finished in
+agentdeck, because transcripts don't record the window's size; agentdeck
+remembers it in `~/.agentdeck/context.json` from then on.
+
 ### Running chats in order
 
 A new conversation can wait for another one to finish first, so two tasks

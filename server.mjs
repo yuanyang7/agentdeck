@@ -1036,7 +1036,8 @@ const server = http.createServer(async (req, res) => {
         markRead(agent, sessionId);
         hub.broadcast({ type: 'sessions_changed', dir });
       }
-      return send(res, 200, { items, live: conv ? hub.snapshot(conv) : null, settings: sessionId ? await chatSettings(backend, sessionId, dir) : null });
+      const context = conv?.context || (sessionId && (await backend.context?.(sessionId, dir).catch(() => null))) || null;
+      return send(res, 200, { items, live: conv ? hub.snapshot(conv) : null, settings: sessionId ? await chatSettings(backend, sessionId, dir) : null, context });
     }
 
     if (p === '/api/route' && req.method === 'POST') {

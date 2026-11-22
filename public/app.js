@@ -636,6 +636,8 @@ function resetView() {
   ui.tasks = [];
   ui.resume = null;
   ui.after = null;
+  ui.context = null;
+  renderContext();
   clearTimeout(pendingAnnouncementTimer);
   $('announcement').textContent = '';
   renderPending();
@@ -748,6 +750,8 @@ async function openConversation(agent, id) {
   fillPickers();
   renderFolders();
   updateForkable();
+  ui.context = data.context || null;
+  renderContext();
   for (const item of data.items) upsert(item);
   if (data.live) {
     for (const item of data.live.items) upsert(item);
@@ -1628,6 +1632,10 @@ function applyStatus(st) {
   renderQueue();
   ui.tasks = st.tasks || [];
   renderTasks();
+  if (st.context) {
+    ui.context = st.context;
+    renderContext();
+  }
   ui.resume = st.resume || null;
   ui.after = st.after || null;
   ui.waiting = !!st.waiting;
@@ -2222,6 +2230,37 @@ function backToDraft(after) {
   renderSessions();
   writeHash();
 }
+
+// ---------- context ----------
+
+// How full the open chat's context is, from the agent's own record of its
+// last reply: a ring with the share of the window, or the token count when
+// the window isn't known yet. Pressing it swaps the share for the counts.
+const shortTokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(n < 1e7 ? 1 : 0)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+
+function renderContext() {
+  const b = $('context');
+  const c = ui.context;
+  b.classList.toggle('hidden', !c || !!ui.group);
+  if (!c) return;
+  const exact = localStorage.getItem('cw_context_exact') === '1';
+  const pct = c.window ? Math.min(100, Math.round((c.used / c.window) * 100)) : null;
+  b.setAttribute('aria-pressed', String(exact));
+  b.dataset.level = pct == null ? '' : pct >= 90 ? 'full' : pct >= 70 ? 'high' : '';
+  b.querySelector('.ctx-fill').style.strokeDasharray = `${pct ?? 0} 100`;
+  b.querySelector('.ctx-label').textContent = pct == null || exact ? (c.window ? `${shortTokens(c.used)} / ${shortTokens(c.window)}` : shortTokens(c.used)) : `${pct}%`;
+  const who = agentLabel(ui.agent);
+  const n = (v) => v.toLocaleString();
+  b.title = c.window
+    ? `Context: ${n(c.used)} of ${n(c.window)} tokens (${pct}%). ${who} summarizes older messages when it fills up${ui.agent === 'claude' ? '; /compact does it now' : ''}.`
+    : `Context: ${n(c.used)} tokens. The window size shows after the next reply here.`;
+  b.setAttribute('aria-label', b.title);
+}
+
+$('context').addEventListener('click', () => {
+  localStorage.setItem('cw_context_exact', localStorage.getItem('cw_context_exact') === '1' ? '0' : '1');
+  renderContext();
+});
 
 // ---------- background tasks ----------
 
