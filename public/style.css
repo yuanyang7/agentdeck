@@ -356,6 +356,18 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .folders-button:hover { border-color: var(--border); }
 .folders-button.on { border-color: var(--accent); }
 .composer-actions { display: flex; align-items: center; flex: none; gap: 6px; }
+/* Context: a ring filling with the share of the window in use. */
+.context-meter { display: inline-flex; align-items: center; gap: 5px; height: 35px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; touch-action: manipulation; }
+@media (hover: hover) and (pointer: fine) { .context-meter:hover:not(:disabled) { background: var(--code-bg); color: var(--text); } }
+.context-meter:active:not(:disabled) { transform: scale(.97); }
+.context-meter svg { transform: rotate(-90deg); flex: none; }
+.context-meter circle { fill: none; stroke-width: 2.5; }
+.ctx-track { stroke: var(--border); }
+.ctx-fill { stroke: var(--muted); stroke-linecap: round; stroke-dasharray: 0 100; }
+.context-meter[data-level="high"] { color: var(--warn-ink); }
+.context-meter[data-level="high"] .ctx-fill { stroke: var(--warn-ink); }
+.context-meter[data-level="full"] { color: var(--danger); }
+.context-meter[data-level="full"] .ctx-fill { stroke: var(--danger); }
 #attach { border: 0; background: transparent; color: var(--muted); font-size: 22px; width: 35px; height: 35px; padding: 0; line-height: 1; }
 #attach:hover { color: var(--accent); }
 #mic { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 35px; height: 35px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); touch-action: manipulation; transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease-out, color 160ms ease-out; }
