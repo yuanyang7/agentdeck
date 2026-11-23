@@ -144,6 +144,15 @@ from each chat's own database in `conversations/`.
 
 ## Usage limits
 
+Each bar in the **Usage** panel has a tick at the expected usage: the share
+of the limit's window that has gone by, which is where an even pace would be
+by now. A 7-day limit that resets in two days expects 71%. The bar turns
+amber when usage is more than 10 points past the tick, and red from 90%
+whatever the pace. The window lengths are 5 hours and 7 days for Claude
+Code, whatever Codex reports, and 5 hours, 7 days and 30 days (taken as a
+month) for OpenCode Go. Limits without a reset time, such as extra usage,
+get no tick.
+
 A Claude Code turn that ends on a plan limit pauses the chat instead of
 ending it. The limit is recognized by the reply's `rate_limit` error, or a
 result that failed with HTTP 429 or says "You've hit your … limit".

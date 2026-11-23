@@ -3780,18 +3780,49 @@ $('mode').addEventListener('change', () => {
 
 // ---------- usage ----------
 
-function usageRow(label, pct, resetsAt) {
+// A reset time as ms: the agents send seconds, ms or an ISO string.
+function resetMs(at) {
+  if (at == null) return null;
+  const t = typeof at === 'number' ? (at < 1e12 ? at * 1000 : at) : new Date(at).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+// How much of a limit an even pace would have used by now: the share of its
+// window that has gone by. Null when the window or its reset is unknown.
+function expectedPercent(resetsAt, windowMs, now = Date.now()) {
+  const end = resetMs(resetsAt);
+  if (!end || !windowMs) return null;
+  return Math.max(0, Math.min(100, (1 - (end - now) / windowMs) * 100));
+}
+
+// Ahead of an even pace by more than this many points reads as a warning.
+const PACE_SLACK = 10;
+
+function usageRow({ label, percent, resetsAt, windowMs }) {
   const row = el('div', 'u-row');
   row.appendChild(el('span', 'u-label', label));
   const bar = el('div', 'u-bar');
   const fill = el('div', 'u-fill');
-  const v = Math.max(0, Math.min(100, pct ?? 0));
+  const v = Math.max(0, Math.min(100, percent ?? 0));
+  const expected = expectedPercent(resetsAt, windowMs);
   fill.style.width = v + '%';
   if (v >= 90) fill.classList.add('hot');
+  else if (expected != null && v > expected + PACE_SLACK) fill.classList.add('ahead');
   bar.appendChild(fill);
+  let pace = '';
+  if (expected != null) {
+    const mark = el('div', 'u-pace');
+    mark.style.left = expected + '%';
+    bar.appendChild(mark);
+    pace = ` · ${Math.round(expected)}% expected`;
+    bar.title = `${Math.round(v)}% used. Spread evenly over the window, you'd be at ${Math.round(expected)}% by now.`;
+  }
+  bar.setAttribute('role', 'img');
+  bar.setAttribute('aria-label', `${label}: ${Math.round(v)}% used${expected != null ? `, ${Math.round(expected)}% expected at an even pace` : ''}`);
   row.appendChild(bar);
-  const reset = resetsAt ? ' · resets ' + new Date(resetsAt).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
-  row.appendChild(el('span', 'u-pct', Math.round(v) + '%' + reset));
+  const end = resetMs(resetsAt);
+  const reset = end ? ' · resets ' + new Date(end).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  row.appendChild(el('span', 'u-pct', Math.round(v) + '%' + pace + reset));
   return row;
 }
 
@@ -3802,7 +3833,7 @@ async function loadUsage() {
     const u = await api('/api/usage?agent=' + encodeURIComponent(ui.agent));
     box.innerHTML = '';
     box.appendChild(el('div', 'u-head', `${agentLabel(ui.agent)} · ${u.plan ? 'Plan: ' + u.plan : 'API key / no plan limits'}`));
-    for (const l of u.limits) box.appendChild(usageRow(l.label, l.percent, l.resetsAt));
+    for (const l of u.limits) box.appendChild(usageRow(l));
     if (!u.limits.length) box.appendChild(el('div', 'muted', 'Plan rate limits are not available for this login.'));
     if ((await loadOptions(ui.agent).catch(() => null))?.resumes) box.appendChild(await autoResumeToggle());
   } catch (err) {

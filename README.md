@@ -83,7 +83,10 @@ continues with the agent it started with. The mode, model and effort menus
 adapt to show what the selected agent offers — see
 [docs/REFERENCE.md](docs/REFERENCE.md#agent-modes) for what each agent's
 modes mean. The **Usage** button in the header shows the plan limits of
-whichever agent's login is active. When a weekly limit of any of the three
+whichever agent's login is active. A tick on each bar marks the expected
+usage, meaning where you'd be by now if you spread the limit evenly over its
+window, so you can see whether you're ahead of or behind that pace. The bar
+turns amber when you're more than 10 points ahead. When a weekly limit of any of the three
 agents resets within a day with at least 40% of it unused, a banner says so,
 so you can spend it before it's gone; dismiss it and it stays away until
 that window resets.

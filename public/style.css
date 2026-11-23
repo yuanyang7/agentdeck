@@ -397,9 +397,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .u-head { font-weight: 700; margin-bottom: 8px; }
 .u-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
 .u-label { width: 110px; flex: none; }
-.u-bar { flex: 1; height: 7px; border-radius: 6px; background: var(--border); overflow: hidden; max-width: 320px; }
-.u-fill { height: 100%; background: var(--accent); }
+.u-bar { position: relative; flex: 1; height: 7px; border-radius: 6px; background: var(--border); max-width: 320px; }
+.u-fill { height: 100%; border-radius: inherit; background: var(--accent); }
+.u-fill.ahead { background: var(--warn-ink); }
 .u-fill.hot { background: var(--danger); }
+/* Where an even pace over the window would be by now. */
+.u-pace { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text); pointer-events: none; }
 .u-pct { color: var(--muted); white-space: nowrap; }
 .u-toggle { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text); cursor: pointer; }
 .u-toggle input { margin: 0; accent-color: var(--accent); }
