@@ -178,6 +178,8 @@ async function loadProjects() {
     const o = document.createElement('option');
     o.value = p.dir;
     o.textContent = p.sessions ? `${p.name}  (${p.sessions})` : p.name;
+    o.dataset.label = p.name;
+    if (p.sessions) o.dataset.meta = `${p.sessions} ${p.sessions === 1 ? 'chat' : 'chats'}`;
     o.title = p.dir;
     sel.appendChild(o);
   }
@@ -2333,6 +2335,246 @@ function fillSelect(sel, entries, value) {
   sel.value = value;
   if (sel.value !== value) sel.value = entries[0]?.[0] ?? '';
 }
+
+// A searchable picker over a native <select> of folders. The select stays
+// the source of truth (hidden): code keeps reading and setting its value and
+// listening for `change`, and the picker follows it. An option with value ''
+// is the placeholder the button shows when nothing is picked; '__other__'
+// (Other folder…) stays at the bottom whatever is typed. An option's
+// data-label and data-meta, when set, are its name and a muted note.
+function searchablePicker(sel, { placeholder = 'Search…', noun = 'folder' } = {}) {
+  const id = sel.id + '-pick';
+  const wrap = el('div', 'picker');
+  const trigger = el('button', 'picker-trigger');
+  trigger.type = 'button';
+  trigger.id = id;
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+  const triggerLabel = el('span', 'picker-label');
+  const triggerMeta = el('span', 'picker-meta');
+  const chevron = el('span', 'picker-chevron');
+  chevron.setAttribute('aria-hidden', 'true');
+  trigger.append(triggerLabel, triggerMeta, chevron);
+
+  const pop = el('div', 'picker-pop');
+  pop.id = id + '-pop';
+  if (pop.showPopover) pop.popover = 'manual';
+  const search = el('input', 'picker-search');
+  Object.assign(search, { type: 'search', placeholder, autocomplete: 'off', spellcheck: false });
+  search.setAttribute('role', 'combobox');
+  search.setAttribute('aria-expanded', 'true');
+  search.setAttribute('aria-autocomplete', 'list');
+  search.setAttribute('aria-controls', id + '-list');
+  const list = el('div', 'picker-list');
+  list.id = id + '-list';
+  list.setAttribute('role', 'listbox');
+  const status = el('div', 'sr-only');
+  status.setAttribute('aria-live', 'polite');
+  pop.append(search, list, status);
+
+  sel.classList.add('picker-native');
+  sel.tabIndex = -1;
+  sel.setAttribute('aria-hidden', 'true');
+  sel.after(wrap);
+  wrap.append(sel, trigger, pop);
+  const label = sel.id && document.querySelector(`label[for="${sel.id}"]`);
+  if (label) label.htmlFor = id;
+  else if (sel.getAttribute('aria-label')) trigger.setAttribute('aria-label', sel.getAttribute('aria-label'));
+  sel.focus = (opts) => trigger.focus(opts);
+
+  const nameOf = (o) => o.dataset.label || o.textContent.trim();
+
+  function sync() {
+    const o = sel.selectedOptions[0];
+    const picked = o && o.value !== '';
+    triggerLabel.textContent = o ? nameOf(o) : '';
+    triggerLabel.classList.toggle('muted', !picked);
+    triggerMeta.textContent = picked ? o.dataset.meta || '' : '';
+    trigger.title = (picked && (o.title || o.value)) || '';
+    trigger.disabled = sel.disabled;
+    if (isOpen()) render();
+  }
+  // Code sets the value directly, which fires no event; follow it anyway.
+  const valueProp = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  Object.defineProperty(sel, 'value', {
+    configurable: true,
+    get() { return valueProp.get.call(this); },
+    set(v) { valueProp.set.call(this, v); sync(); },
+  });
+  new MutationObserver(sync).observe(sel, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['disabled'] });
+
+  let shown = []; // options listed, in order
+  let active = -1;
+
+  // Name prefix first, then anywhere in the name, then anywhere in the path;
+  // within each, the order the select already has (recent activity).
+  function matches(q) {
+    const opts = [...sel.options].filter((o) => o.value !== '' && o.value !== '__other__');
+    const other = [...sel.options].find((o) => o.value === '__other__');
+    let hits = opts;
+    if (q) {
+      const rank = (o) => {
+        const n = nameOf(o).toLowerCase();
+        if (n.startsWith(q)) return 0;
+        if (n.includes(q)) return 1;
+        if (o.value.toLowerCase().includes(q) || (o.title || '').toLowerCase().includes(q)) return 2;
+        return 3;
+      };
+      hits = opts.map((o) => [o, rank(o)]).filter(([, r]) => r < 3).sort((a, b) => a[1] - b[1]).map(([o]) => o);
+    }
+    return { hits, other };
+  }
+
+  function highlight(text, q) {
+    const i = q ? text.toLowerCase().indexOf(q) : -1;
+    if (i < 0) return [text];
+    return [text.slice(0, i), el('mark', '', text.slice(i, i + q.length)), text.slice(i + q.length)];
+  }
+
+  function row(o, q, extra) {
+    const r = el('div', 'picker-option' + (extra ? ' ' + extra : ''));
+    r.id = `${id}-o${shown.length}`;
+    r.setAttribute('role', 'option');
+    const isSel = o.value === sel.value;
+    r.setAttribute('aria-selected', String(isSel));
+    if (isSel) r.classList.add('selected');
+    const name = el('span', 'picker-option-name');
+    name.append(...highlight(nameOf(o), q));
+    r.append(name);
+    if (o.dataset.meta) r.append(el('span', 'picker-option-meta', o.dataset.meta));
+    if (o.title && o.title !== nameOf(o)) r.title = o.title;
+    const idx = shown.length;
+    r.addEventListener('click', () => pick(shown[idx]));
+    r.addEventListener('pointermove', () => { if (active !== idx) setActive(idx, false); });
+    shown.push(o);
+    return r;
+  }
+
+  function render() {
+    const q = search.value.trim().toLowerCase();
+    const { hits, other } = matches(q);
+    shown = [];
+    list.replaceChildren();
+    for (const o of hits) list.append(row(o, q));
+    if (!hits.length) {
+      const empty = el('div', 'picker-empty');
+      empty.append(q ? `No ${noun} matches “${search.value.trim()}”.` : `No ${noun}s yet.`);
+      if (other) empty.append(el('span', 'muted', ' Pick one by its path below.'));
+      list.append(empty);
+    }
+    if (other) list.append(row(other, '', 'picker-other'));
+    status.textContent = q ? `${hits.length} ${hits.length === 1 ? 'match' : 'matches'}` : '';
+    // Start on the current pick when it's listed, else the best match.
+    const cur = shown.findIndex((o) => o.value === sel.value);
+    setActive(!q && cur >= 0 ? cur : shown.length ? 0 : -1, true);
+  }
+
+  function setActive(i, scroll) {
+    active = i;
+    [...list.querySelectorAll('.picker-option')].forEach((r, j) => r.classList.toggle('active', j === i));
+    const r = i >= 0 ? list.querySelectorAll('.picker-option')[i] : null;
+    if (r) {
+      search.setAttribute('aria-activedescendant', r.id);
+      if (scroll) r.scrollIntoView({ block: 'nearest' });
+    } else search.removeAttribute('aria-activedescendant');
+  }
+
+  function place() {
+    const r = trigger.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    const vh = window.innerHeight;
+    const width = Math.min(Math.max(r.width, 280), vw - 16);
+    const left = Math.max(8, Math.min(r.left, vw - width - 8));
+    const below = vh - r.bottom - 12;
+    const above = r.top - 12;
+    const up = below < 240 && above > below;
+    pop.style.width = width + 'px';
+    pop.style.left = left + 'px';
+    pop.style.top = up ? '' : r.bottom + 6 + 'px';
+    pop.style.bottom = up ? vh - r.top + 6 + 'px' : '';
+    pop.style.setProperty('--picker-room', Math.max(160, Math.min(up ? above : below, 420)) + 'px');
+    pop.classList.toggle('up', up);
+  }
+
+  const isOpen = () => wrap.classList.contains('open');
+
+  function open() {
+    if (isOpen() || sel.disabled) return;
+    search.value = '';
+    wrap.classList.add('open');
+    trigger.setAttribute('aria-expanded', 'true');
+    if (pop.showPopover) pop.showPopover();
+    place();
+    render();
+    search.focus({ preventScroll: true });
+    document.addEventListener('pointerdown', outside, true);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', onScroll, true);
+  }
+
+  function close(refocus) {
+    if (!isOpen()) return;
+    wrap.classList.remove('open');
+    trigger.setAttribute('aria-expanded', 'false');
+    if (pop.hidePopover) pop.hidePopover();
+    document.removeEventListener('pointerdown', outside, true);
+    window.removeEventListener('resize', place);
+    window.removeEventListener('scroll', onScroll, true);
+    if (refocus) trigger.focus();
+  }
+
+  function pick(o) {
+    if (!o) return;
+    close(true);
+    if (o.value === sel.value) return; // like a native select: no change, no event
+    sel.value = o.value;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  const outside = (e) => { if (!wrap.contains(e.target)) close(false); };
+  const onScroll = (e) => { if (!pop.contains(e.target)) place(); };
+
+  // Clicks in the list keep focus in the search box.
+  pop.addEventListener('pointerdown', (e) => { if (e.target !== search) e.preventDefault(); });
+  trigger.addEventListener('click', () => (isOpen() ? close(true) : open()));
+  trigger.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      open();
+    }
+  });
+  search.addEventListener('input', render);
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!shown.length) return;
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      setActive((active + step + shown.length) % shown.length, true);
+    } else if (e.key === 'Home' || e.key === 'End') {
+      if (!shown.length || search.value) return; // in text, they move the caret
+      e.preventDefault();
+      setActive(e.key === 'Home' ? 0 : shown.length - 1, true);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      pick(shown[active]);
+    } else if (e.key === 'Escape') {
+      // Only the picker closes, not the dialog or sidebar around it.
+      e.preventDefault();
+      e.stopPropagation();
+      close(true);
+    } else if (e.key === 'Tab') {
+      close(false);
+    }
+  });
+  wrap.addEventListener('focusout', (e) => {
+    if (isOpen() && !wrap.contains(e.relatedTarget) && e.relatedTarget) close(false);
+  });
+  sync();
+}
+
+searchablePicker($('project'), { placeholder: 'Search workspaces…', noun: 'workspace' });
+searchablePicker($('move-to'), { placeholder: 'Search workspaces…', noun: 'workspace' });
+searchablePicker($('folder-add'), { placeholder: 'Search projects…', noun: 'project' });
 
 async function loadOptions(agent) {
   if (!ui.options.has(agent)) ui.options.set(agent, api('/api/options?agent=' + encodeURIComponent(agent)));
