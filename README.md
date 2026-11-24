@@ -262,9 +262,12 @@ call to a cheap model (Sonnet, by default) reads the workspace index and
 names the project the task is about; the page then opens a new chat there
 and sends the task as typed, with the agent, model and mode the composer
 shows. The chat starts with a line saying which project was picked and why.
-When the guess is a weak one, it asks first. When no project fits, it
-offers to ask the question as a [chat](#chat) instead, or leaves the task
-in the composer for you to place. See
+When the guess is a weak one, it asks first. When no project fits a task
+that is new work ("make a pomodoro timer app"), it offers to create a new
+project for it in `~/code` (the first of `PROJECT_ROOTS`), with a folder
+name filled in that you can change, and sends the task there. When no
+project fits a question, it offers to ask it as a [chat](#chat) instead, or
+leaves the task in the composer for you to place. See
 [docs/REFERENCE.md](docs/REFERENCE.md#just-ask).
 
 ### Chat

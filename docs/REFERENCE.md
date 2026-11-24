@@ -408,9 +408,22 @@ takes a few seconds and costs about 2,500 input tokens, most of it the index.
 
 The answer has to be a top-level project under `PROJECT_ROOTS`; a path
 inside one counts for that project, and anything else counts as no match.
-When the answer is no match (a general question, or a task that asks for a
-new project), the page says so and keeps the task in the composer. When the
-confidence is `low`, it asks before sending. Picking a workspace, opening a
+When the confidence is `low`, the page asks before sending.
+
+With no match, the answer also carries `newProject`: a folder name (like
+`pomodoro-timer`) when the task is to build or start something no project
+covers, or null for a question or anything else that isn't new work. With a
+name, the page asks whether to create a new project, with the name filled
+in and editable, then calls `POST /api/projects` with `{ name }`. That makes
+an empty folder of that name in the first of `PROJECT_ROOTS` (`~/code` by
+default) and answers `{ dir, name }`; a name with anything but letters,
+digits, dots, dashes and underscores is refused (400), as is a folder that
+already exists (409), and the page asks again with the reason. The page
+then switches to the new workspace, adds a "Created ~/code/X for this task"
+line and sends the task there; the agent starts in an empty folder, with no
+git repository until it makes one. Without a name, the page offers to send
+the message to [Chat](#chat) instead. Cancelling either keeps the task in
+the composer. Picking a workspace, opening a
 chat or pressing **New conversation** leaves the Just ask state. A message
 with only images can't be routed; add words.
 
@@ -972,7 +985,7 @@ its own, and the prompt leaves the address once the page has read it.
   agent.
 - `lib/items.mjs`: the agent-neutral transcript format the page renders.
 - `lib/workspace-index.mjs`: the project map given to agents.
-- `lib/router.mjs`: Just ask, picking the project a task is about.
+- `lib/router.mjs`: Just ask, picking the project a task is about, or a folder name for a new one.
 - `lib/chat-mode.mjs`: the Chat workspace's folder, the Chat mode and its
   instructions; each agent in `lib/agents/` maps the mode onto its own.
 - `lib/groups.mjs`: which conversations were started together as a group of

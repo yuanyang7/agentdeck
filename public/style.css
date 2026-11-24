@@ -262,7 +262,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .subagent-status { color: var(--muted); font-size: 11px; margin-top: 6px; }
 .subagent-status:empty { display: none; }
 .subagent-status.err { color: var(--danger); }
-.result-line { text-align: center; color: var(--muted); font-size: 11px; }
+.result-line { text-align: center; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .msg-images { display: flex; flex-wrap: wrap; gap: 8px; }
 .msg-images + * { margin-top: 8px; }
 .msg-images img { max-height: 200px; max-width: 100%; border-radius: 8px; cursor: zoom-in; }

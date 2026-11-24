@@ -554,8 +554,10 @@ $('just-ask').addEventListener('click', () => {
 });
 
 // Asks the server which project `text` is about and switches the page to
-// it. Returns false when the task stays in the composer: no project fits,
-// the guess was declined, or the call failed.
+// it. When no project fits a task that is new work, offers to create one
+// under the first project root. Returns false when the task stays in the
+// composer: no project fits, the guess or new project was declined, or the
+// call failed.
 async function routeToProject(text) {
   $('status').textContent = 'Picking a project…';
   let r;
@@ -570,6 +572,7 @@ async function routeToProject(text) {
   if (!ui.ask || ui.key) return false; // the page moved on meanwhile
   if (!r.dir) {
     const why = r.reason ? ' ' + r.reason : '';
+    if (r.newProject) return createProjectFor(r);
     if (!chatProject()) {
       alert(`Could not tell which project this is about.${why}\nPick a workspace and send it there.`);
       return false;
@@ -583,6 +586,36 @@ async function routeToProject(text) {
   await leaveAsk(r.dir);
   upsert({ id: 'route-' + randomId(), kind: 'notice', text: `Sent to ${r.name} (${r.confidence} confidence, ${r.model}): ${r.reason}` });
   return true;
+}
+
+// No project fits a Just ask task that is new work: asks for a folder name
+// (the router's suggestion filled in), creates the folder under the project
+// root and moves the task there. A name already taken or not allowed asks
+// again; Cancel keeps the task in the composer.
+async function createProjectFor(r) {
+  const root = r.root.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~');
+  let name = r.newProject;
+  let problem = '';
+  for (;;) {
+    const why = r.reason ? `${r.reason}\n` : '';
+    name = prompt(`${problem || `No project fits this task. ${why}`}Create a new project for it in ${root}? Folder name:`, name);
+    if (name == null || !name.trim()) return false;
+    name = name.trim();
+    try {
+      const made = await api('/api/projects', { name });
+      if (!ui.ask || ui.key) return false; // the page moved on meanwhile
+      await loadProjects();
+      await leaveAsk(made.dir);
+      upsert({ id: 'route-' + randomId(), kind: 'notice', text: `Created ${root}/${made.name} for this task (${r.model}): ${r.reason}` });
+      return true;
+    } catch (err) {
+      if (err.status !== 400 && err.status !== 409) {
+        alert(`Could not create the project: ${err.message}`);
+        return false;
+      }
+      problem = `${err.message}\n`;
+    }
+  }
 }
 
 // Just ask's message has a workspace now: the page becomes a new chat there,

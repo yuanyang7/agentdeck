@@ -26,7 +26,7 @@ import { rootFolders, checkFolders, mentionedFolders } from './lib/folders.mjs';
 import * as devices from './lib/devices.mjs';
 import * as actions from './lib/actions.mjs';
 import * as toolhub from './lib/toolhub.mjs';
-import { routeTask, MODEL as ROUTE_MODEL } from './lib/router.mjs';
+import { routeTask, projectName, MODEL as ROUTE_MODEL } from './lib/router.mjs';
 import * as feedbackloop from './lib/feedbackloop.mjs';
 import { collect as collectStats } from './lib/stats.mjs';
 import { autoResume, setAutoResume } from './lib/resume.mjs';
@@ -1001,7 +1001,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { path: file });
     }
 
-    if (p === '/api/projects') return send(res, 200, await listProjects());
+    if (p === '/api/projects' && req.method === 'GET') return send(res, 200, await listProjects());
 
     if (p === '/api/sessions') return send(res, 200, await listConversations(url.searchParams.get('dir')));
 
@@ -1049,10 +1049,29 @@ const server = http.createServer(async (req, res) => {
       const projects = await listProjects();
       if (!projects.some((x) => x.inRoot)) return send(res, 400, { error: 'No projects under the project roots.' });
       try {
-        return send(res, 200, { ...(await routeTask(text, projects, PROJECT_ROOTS)), model: ROUTE_MODEL });
+        return send(res, 200, { ...(await routeTask(text, projects, PROJECT_ROOTS)), model: ROUTE_MODEL, root: PROJECT_ROOTS[0] });
       } catch (err) {
         return send(res, 502, { error: err.message });
       }
+    }
+
+    if (p === '/api/projects' && req.method === 'POST') {
+      // A new, empty project folder under the first project root, for a Just
+      // ask task no project fits. { name } is the folder name; an existing
+      // folder is refused, so nothing already there is touched.
+      const { name } = await readJson(req);
+      const clean = projectName(name);
+      if (!clean || clean !== String(name).trim()) return send(res, 400, { error: 'Use letters, digits, dots, dashes or underscores for the folder name.' });
+      const dir = path.join(PROJECT_ROOTS[0], clean);
+      try {
+        fs.mkdirSync(PROJECT_ROOTS[0], { recursive: true });
+        fs.mkdirSync(dir);
+      } catch (err) {
+        if (err.code === 'EEXIST') return send(res, 409, { error: `${dir} already exists.` });
+        return send(res, 500, { error: err.message });
+      }
+      hub.broadcast({ type: 'sessions_changed' });
+      return send(res, 200, { dir, name: clean });
     }
 
     if (p === '/api/compare' && req.method === 'GET') {
